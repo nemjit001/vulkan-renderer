@@ -16,22 +16,27 @@ function(target_compile_shaders TARGET_NAME TARGET_SHADER_SOURCES)
 	foreach(SHADER_SOURCE IN LISTS TARGET_SHADER_SOURCES)
 		message(STATUS "${TARGET_NAME}: found shader file ${SHADER_SOURCE}")
 		get_filename_component(SHADER_NAME ${SHADER_SOURCE} NAME_WLE)
-		set(SHADER_OUTPUT_FILE "${SHADER_NAME}.spv")
+		set(SHADER_OUTPUT_FILE "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${SHADER_NAME}.spv")
 
-		add_custom_command(
-			# TARGET ${TARGET_NAME}
-			OUTPUT ${SHADER_OUTPUT_FILE}
-			COMMAND ${GLSL_COMPILER} ${SHADER_SOURCE} -o "$<TARGET_FILE_DIR:${TARGET_NAME}>/${SHADER_OUTPUT_FILE}"
+		# Compile shaders to runtime output directory
+		add_custom_command(OUTPUT ${SHADER_OUTPUT_FILE}
+			COMMAND ${GLSL_COMPILER} ${SHADER_SOURCE} -o "${SHADER_OUTPUT_FILE}"
 			DEPENDS ${SHADER_SOURCE}
-			COMMENT "Compiling ${SHADER_SOURCE} -> $<TARGET_FILE_DIR:${TARGET_NAME}>/${SHADER_OUTPUT_FILE}"
+			COMMENT "Compiling ${SHADER_SOURCE} -> ${SHADER_OUTPUT_FILE}"
+		)
+
+		# Post build copy, resolves issues with multi-config CMake configurators
+		add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy "${SHADER_OUTPUT_FILE}" "$<TARGET_FILE_DIR:${TARGET_NAME}>"
 		)
 
 		list(APPEND ${TARGET_NAME}_SHADER_SOURCES ${SHADER_OUTPUT_FILE})
 	endforeach()
 
-	add_custom_target(${TARGET_NAME}_CompileShaders ALL
+	add_custom_target(${TARGET_NAME}_CompileShaders
 		DEPENDS "${${TARGET_NAME}_SHADER_SOURCES}"
 		COMMENT "${TARGET_NAME}: Compiling shaders"
 	)
-	# add_dependencies(${TARGET_NAME} ${TARGET_NAME}_CompileShaders)
+
+	add_dependencies(${TARGET_NAME} ${TARGET_NAME}_CompileShaders)
 endfunction()
