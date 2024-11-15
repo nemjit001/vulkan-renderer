@@ -26,8 +26,10 @@ function(target_compile_shaders TARGET_NAME TARGET_SHADER_SOURCES)
 		)
 
 		# Post build copy, resolves issues with multi-config CMake configurators
-		add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+		add_custom_target(${SHADER_NAME} ALL
 			COMMAND ${CMAKE_COMMAND} -E copy "${SHADER_OUTPUT_FILE}" "$<TARGET_FILE_DIR:${TARGET_NAME}>"
+			COMMENT "Copy ${SHADER_OUTPUT_FILE} -> $<TARGET_FILE_DIR:${TARGET_NAME}>"
+			DEPENDS ${SHADER_OUTPUT_FILE}
 		)
 
 		list(APPEND ${TARGET_NAME}_SHADER_SOURCES ${SHADER_OUTPUT_FILE})
