@@ -1,0 +1,30 @@
+{
+  "version": 8,
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default Configuration",
+      "binaryDir": "${sourceDir}/out/${presetName}"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "configuration": "Debug",
+      "configurePreset": "default"
+    },
+    {
+      "name": "release-debug",
+      "displayName": "Release (Debug Info)",
+      "configuration": "RelWithDebInfo",
+      "configurePreset":  "default"
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "configuration": "Release",
+      "configurePreset": "default"
+    }
+  ]
+}

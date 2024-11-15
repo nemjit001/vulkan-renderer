@@ -1,0 +1,10 @@
+
+function(target_enable_warnings_as_errors TARGET_NAME)
+	message(STATUS "${TARGET_NAME}: Compiling warnings as errors")
+	set_target_properties(${TARGET_NAME} PROPERTIES TARGET_COMPILE_WARNINGS_AS_ERRORS ON)
+	if (MSVC)
+		target_compile_options(${TARGET_NAME} PRIVATE /W4)
+	else()
+		target_compile_options(${TARGET_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+	endif()
+endfunction()

@@ -1,0 +1,6 @@
+[submodule "vendored/volk"]
+	path = vendored/volk
+	url = https://github.com/zeux/volk
+[submodule "vendored/SDL"]
+	path = vendored/SDL
+	url = https://github.com/libsdl-org/SDL
