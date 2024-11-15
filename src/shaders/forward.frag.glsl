@@ -11,5 +11,5 @@ layout(location = 0) out vec4 out_FragColor;
 
 void main()
 {
-	out_FragColor = vec4(in_Input.color, 1);
+	out_FragColor = vec4(in_Input.texCoord, 0, 1);
 }
