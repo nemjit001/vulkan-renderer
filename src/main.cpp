@@ -272,6 +272,7 @@ void resize()
 
             VkImageView view = VK_NULL_HANDLE;
             vkCreateImageView(device, &swapViewCreateInfo, nullptr, &view);
+            assert(view != VK_NULL_HANDLE);
             swapImageViews.push_back(view);
         }
     }
@@ -349,6 +350,7 @@ void resize()
 
             VkFramebuffer framebuffer = VK_NULL_HANDLE;
             vkCreateFramebuffer(device, &framebufferCreateInfo, nullptr, &framebuffer);
+            assert(framebuffer != VK_NULL_HANDLE);
             swapFramebuffers.push_back(framebuffer);
         }
     }
@@ -568,6 +570,7 @@ int main()
 
             VkImageView view = VK_NULL_HANDLE;
             vkCreateImageView(device, &swapViewCreateInfo, nullptr, &view);
+            assert(view != VK_NULL_HANDLE);
             swapImageViews.push_back(view);
         }
     }
@@ -758,6 +761,7 @@ int main()
 
             VkFramebuffer framebuffer = VK_NULL_HANDLE;
             vkCreateFramebuffer(device, &framebufferCreateInfo, nullptr, &framebuffer);
+            assert(framebuffer != VK_NULL_HANDLE);
             swapFramebuffers.push_back(framebuffer);
         }
     }
