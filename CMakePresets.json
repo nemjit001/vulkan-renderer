@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 7,
   "configurePresets": [
     {
       "name": "default",
@@ -9,21 +9,21 @@
   ],
   "buildPresets": [
     {
-      "name": "debug",
-      "displayName": "Debug",
-      "configuration": "Debug",
+      "name": "release",
+      "displayName": "Release",
+      "configuration": "Release",
       "configurePreset": "default"
     },
     {
       "name": "release-debug",
       "displayName": "Release (Debug Info)",
       "configuration": "RelWithDebInfo",
-      "configurePreset":  "default"
+      "configurePreset": "default"
     },
     {
-      "name": "release",
-      "displayName": "Release",
-      "configuration": "Release",
+      "name": "debug",
+      "displayName": "Debug",
+      "configuration": "Debug",
       "configurePreset": "default"
     }
   ]
