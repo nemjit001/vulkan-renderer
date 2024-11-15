@@ -41,6 +41,10 @@ VkFence frameReady;
 VkCommandPool commandPool;
 VkCommandBuffer commandBuffer;
 
+VkImage depthStencilTarget;
+VkDeviceMemory depthStencilMemory;
+VkImageView depthStencilView;
+
 VkRenderPass renderPass;
 std::vector<VkFramebuffer> swapFramebuffers;
 
@@ -89,6 +93,23 @@ uint32_t findQueueFamily(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, 
     return VK_QUEUE_FAMILY_IGNORED;
 }
 
+uint32_t getMemoryTypeIndex(VkPhysicalDeviceMemoryProperties const& deviceMemProperties, VkMemoryRequirements const& requirements, VkMemoryPropertyFlags propertyFlags)
+{
+    for (uint32_t memIdx = 0; memIdx < deviceMemoryProperties.memoryTypeCount; memIdx++)
+    {
+        uint32_t const memoryTypeBits = (1 << memIdx);
+
+        if ((requirements.memoryTypeBits & memoryTypeBits) != 0
+            && (deviceMemoryProperties.memoryTypes[memIdx].propertyFlags & propertyFlags) == propertyFlags)
+        {
+            return memIdx;
+        }
+    }
+
+    printf("Failed to find memory type index for memory requirements and propry flags combination\n");
+    return ~0U;
+}
+
 void resize()
 {
     int width = 0;
@@ -107,6 +128,10 @@ void resize()
 
     // Destroy swap dependent resources
     {
+        vkDestroyImageView(device, depthStencilView, nullptr);
+        vkFreeMemory(device, depthStencilMemory, nullptr);
+        vkDestroyImage(device, depthStencilTarget, nullptr);
+
         for (auto& framebuffer : swapFramebuffers) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
         }
@@ -172,11 +197,65 @@ void resize()
 
     // Recreate swap dependent resources
     {
+        VkImageCreateInfo depthStencilTargetCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        depthStencilTargetCreateInfo.flags = 0;
+        depthStencilTargetCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+        depthStencilTargetCreateInfo.format = VK_FORMAT_D32_SFLOAT;
+        depthStencilTargetCreateInfo.extent = VkExtent3D{ swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1 };
+        depthStencilTargetCreateInfo.mipLevels = 1;
+        depthStencilTargetCreateInfo.arrayLayers = 1;
+        depthStencilTargetCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthStencilTargetCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        depthStencilTargetCreateInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        depthStencilTargetCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        depthStencilTargetCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        if (VK_FAILED(vkCreateImage(device, &depthStencilTargetCreateInfo, nullptr, &depthStencilTarget)))
+        {
+            printf("Vulkan depth stencil create failed\n");
+            return;
+        }
+
+        VkMemoryRequirements memoryRequirements{};
+        vkGetImageMemoryRequirements(device, depthStencilTarget, &memoryRequirements);
+
+        VkMemoryAllocateInfo imageAllocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        imageAllocateInfo.allocationSize = memoryRequirements.size;
+        imageAllocateInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, memoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        if (VK_FAILED(vkAllocateMemory(device, &imageAllocateInfo, nullptr, &depthStencilMemory)))
+        {
+            printf("Vulkan depth stencil memory allocation failed\n");
+            return;
+        }
+        vkBindImageMemory(device, depthStencilTarget, depthStencilMemory, 0);
+
+        VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        depthStencilViewCreateInfo.flags = 0;
+        depthStencilViewCreateInfo.image = depthStencilTarget;
+        depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        depthStencilViewCreateInfo.format = VK_FORMAT_D32_SFLOAT;
+        depthStencilViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        depthStencilViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        depthStencilViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        depthStencilViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        depthStencilViewCreateInfo.subresourceRange.baseMipLevel = 0;
+        depthStencilViewCreateInfo.subresourceRange.levelCount = 1;
+        depthStencilViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+        depthStencilViewCreateInfo.subresourceRange.layerCount = 1;
+        depthStencilViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+        if (VK_FAILED(vkCreateImageView(device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
+        {
+            printf("Vulkan depth stencil view create failed\n");
+            return;
+        }
+
         swapFramebuffers.reserve(swapImageViews.size());
         for (auto& swapView : swapImageViews)
         {
             VkExtent2D const swapExtent = swapchainCreateInfo.imageExtent;
-            VkImageView attachments[] = { swapView };
+            VkImageView attachments[] = { swapView, depthStencilView, };
 
             VkFramebufferCreateInfo framebufferCreateInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
             framebufferCreateInfo.flags = 0;
@@ -346,8 +425,18 @@ int main()
         std::vector<VkSurfaceFormatKHR> surfaceFormats(surfaceFormatCount);
         vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, surfaceFormats.data());
 
-        // Create swap chain
         VkFormat preferredFormat = surfaceFormats[0].format;
+        for (auto const& format : surfaceFormats)
+        {
+            // Pick first available SRGB format for swap
+            if (format.format == VK_FORMAT_B8G8R8A8_SRGB
+                || format.format == VK_FORMAT_R8G8B8A8_SRGB)
+            {
+                preferredFormat = format.format;
+            }
+        }
+
+        // Create swap chain
         swapchainCreateInfo = VkSwapchainCreateInfoKHR{ VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
         swapchainCreateInfo.flags = 0;
         swapchainCreateInfo.surface = surface;
@@ -442,6 +531,63 @@ int main()
             return 1;
         }
     }
+    
+    // Create depth stencil target
+    {
+        VkImageCreateInfo depthStencilTargetCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        depthStencilTargetCreateInfo.flags = 0;
+        depthStencilTargetCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+        depthStencilTargetCreateInfo.format = VK_FORMAT_D32_SFLOAT;
+        depthStencilTargetCreateInfo.extent = VkExtent3D{ swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1 };
+        depthStencilTargetCreateInfo.mipLevels = 1;
+        depthStencilTargetCreateInfo.arrayLayers = 1;
+        depthStencilTargetCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthStencilTargetCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        depthStencilTargetCreateInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        depthStencilTargetCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        depthStencilTargetCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        if (VK_FAILED(vkCreateImage(device, &depthStencilTargetCreateInfo, nullptr, &depthStencilTarget)))
+        {
+            printf("Vulkan depth stencil create failed\n");
+            return 1;
+        }
+
+        VkMemoryRequirements memoryRequirements{};
+        vkGetImageMemoryRequirements(device, depthStencilTarget, &memoryRequirements);
+
+        VkMemoryAllocateInfo imageAllocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        imageAllocateInfo.allocationSize = memoryRequirements.size;
+        imageAllocateInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, memoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        
+        if (VK_FAILED(vkAllocateMemory(device, &imageAllocateInfo, nullptr, &depthStencilMemory)))
+        {
+            printf("Vulkan depth stencil memory allocation failed\n");
+            return 1;
+        }
+        vkBindImageMemory(device, depthStencilTarget, depthStencilMemory, 0);
+
+        VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        depthStencilViewCreateInfo.flags = 0;
+        depthStencilViewCreateInfo.image = depthStencilTarget;
+        depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        depthStencilViewCreateInfo.format = VK_FORMAT_D32_SFLOAT;
+        depthStencilViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        depthStencilViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        depthStencilViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        depthStencilViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        depthStencilViewCreateInfo.subresourceRange.baseMipLevel = 0;
+        depthStencilViewCreateInfo.subresourceRange.levelCount = 1;
+        depthStencilViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+        depthStencilViewCreateInfo.subresourceRange.layerCount = 1;
+        depthStencilViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+        if (VK_FAILED(vkCreateImageView(device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
+        {
+            printf("Vulkan depth stencil view create failed\n");
+            return 1;
+        }
+    }
 
     // Create main render pass
     {
@@ -456,9 +602,22 @@ int main()
         colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
+        VkAttachmentDescription depthStencilAttachment{};
+        depthStencilAttachment.flags = 0;
+        depthStencilAttachment.format = VK_FORMAT_D32_SFLOAT;
+        depthStencilAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        depthStencilAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depthStencilAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthStencilAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        depthStencilAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
         VkAttachmentReference colorAttachmentRefs[] = {
             VkAttachmentReference{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
         };
+
+        VkAttachmentReference depthStencilAttachmentRef{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
 
         VkSubpassDescription subpass{};
         subpass.flags = 0;
@@ -468,7 +627,7 @@ int main()
         subpass.colorAttachmentCount = SIZEOF_ARRAY(colorAttachmentRefs);
         subpass.pColorAttachments = colorAttachmentRefs;
         subpass.pResolveAttachments = nullptr;
-        subpass.pDepthStencilAttachment = nullptr;
+        subpass.pDepthStencilAttachment = &depthStencilAttachmentRef;
         subpass.preserveAttachmentCount = 0;
         subpass.pPreserveAttachments = nullptr;
 
@@ -480,9 +639,9 @@ int main()
         dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
 
-        VkAttachmentDescription attachments[] = { colorAttachment, };
-        VkSubpassDescription subpasses[] = { subpass };
-        VkSubpassDependency dependencies[] = { dependency };
+        VkAttachmentDescription attachments[] = { colorAttachment, depthStencilAttachment, };
+        VkSubpassDescription subpasses[] = { subpass, };
+        VkSubpassDependency dependencies[] = { dependency, };
         VkRenderPassCreateInfo renderPassCreateInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
         renderPassCreateInfo.flags = 0;
         renderPassCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
@@ -505,7 +664,7 @@ int main()
         for (auto& swapView : swapImageViews)
         {
             VkExtent2D const swapExtent = swapchainCreateInfo.imageExtent;
-            VkImageView attachments[] = { swapView };
+            VkImageView attachments[] = { swapView, depthStencilView, };
 
             VkFramebufferCreateInfo framebufferCreateInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
             framebufferCreateInfo.flags = 0;
@@ -582,6 +741,7 @@ int main()
 
             VkClearValue clearValues[] = {
                 VkClearValue{{ 0.3F, 0.6F, 0.9F, 1.0F }},
+                VkClearValue{{ 1.0F, 0x00 }},
             };
 
             VkRenderPassBeginInfo renderPassBeginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
@@ -650,6 +810,10 @@ int main()
         vkDestroyFramebuffer(device, framebuffer, nullptr);
     }
     vkDestroyRenderPass(device, renderPass, nullptr);
+
+    vkDestroyImageView(device, depthStencilView, nullptr);
+    vkFreeMemory(device, depthStencilMemory, nullptr);
+    vkDestroyImage(device, depthStencilTarget, nullptr);
 
     vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     vkDestroyCommandPool(device, commandPool, nullptr);
