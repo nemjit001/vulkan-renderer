@@ -6,8 +6,13 @@
 #include <iostream>
 #include <vector>
 
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_FORCE_LEFT_HANDED
+#define GLM_FORCE_RADIANS
 #define SDL_MAIN_HANDLED
 #define VOLK_IMPLEMENTATION
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <SDL.h>
 #include <SDL_vulkan.h>
 #include <volk.h>
@@ -22,9 +27,16 @@ constexpr uint32_t DefaultWindowHeight = 900;
 /// @brief Vertex struct with interleaved per-vertex data.
 struct Vertex
 {
-    float position[3];
-    float color[3];
-    float texCoord[2];
+    glm::vec3 position;
+    glm::vec3 color;
+    glm::vec2 texCoord;
+};
+
+/// @brief Uniform scene data structure, matches data uniform available in shaders.
+struct UniformSceneData
+{
+    alignas(4)  glm::vec3 cameraPosition;
+    alignas(16) glm::mat4 viewproject;
 };
 
 /// @brief Vulkan debug callback.
@@ -164,6 +176,7 @@ VkImageView depthStencilView;
 VkRenderPass renderPass;
 std::vector<VkFramebuffer> swapFramebuffers;
 
+VkDescriptorSetLayout descriptorSetLayout;
 VkPipelineLayout pipelineLayout;
 VkPipeline graphicsPipeline;
 
@@ -173,6 +186,12 @@ VkBuffer vertexBuffer;
 VkDeviceMemory vertexBufferMemory;
 VkBuffer indexBuffer;
 VkDeviceMemory indexBufferMemory;
+
+VkBuffer sceneDataBuffer;
+VkDeviceMemory sceneDataBufferMemory;
+
+VkDescriptorPool descriptorPool;
+VkDescriptorSet descriptorSet;
 
 void resize()
 {
@@ -186,9 +205,7 @@ void resize()
     printf("Window resized (%d x %d)\n", width, height);
 
     // Wait for previous frame
-    {
-        vkWaitForFences(device, 1, &frameReady, VK_TRUE, UINT64_MAX);
-    }
+    vkWaitForFences(device, 1, &frameReady, VK_TRUE, UINT64_MAX);
 
     // Destroy swap dependent resources
     {
@@ -745,12 +762,32 @@ int main()
         }
     }
 
-    // Create pipelin layout & graphics pipeline
+    // Create descriptor set layouts, pipeline layout, and graphics pipeline
     {
+        VkDescriptorSetLayoutBinding sceneDataUniformBinding{};
+        sceneDataUniformBinding.binding = 0;
+        sceneDataUniformBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        sceneDataUniformBinding.descriptorCount = 1;
+        sceneDataUniformBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        sceneDataUniformBinding.pImmutableSamplers = nullptr;
+
+        VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[] = { sceneDataUniformBinding, };
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        descriptorSetLayoutCreateInfo.flags = 0;
+        descriptorSetLayoutCreateInfo.bindingCount = SIZEOF_ARRAY(descriptorSetLayoutBindings);
+        descriptorSetLayoutCreateInfo.pBindings = descriptorSetLayoutBindings;
+
+        if (VK_FAILED(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout)))
+        {
+            printf("Vulkan descriptor set layout create failed\n");
+            return 1;
+        }
+
+        VkDescriptorSetLayout descriptorSetLayouts[] = { descriptorSetLayout, };
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
         pipelineLayoutCreateInfo.flags = 0;
-        pipelineLayoutCreateInfo.setLayoutCount = 0;
-        pipelineLayoutCreateInfo.pSetLayouts = nullptr;
+        pipelineLayoutCreateInfo.setLayoutCount = SIZEOF_ARRAY(descriptorSetLayouts);
+        pipelineLayoutCreateInfo.pSetLayouts = descriptorSetLayouts;
         pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
         pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
@@ -947,7 +984,7 @@ int main()
         vkDestroyShaderModule(device, vertexShader, nullptr);
     }
 
-    // Create mesh data
+    // Create vertex & index buffers with mesh data
     {
         Vertex vertices[] = {
             Vertex{ { -1.0F,  1.0F, 0.0F, }, { 1.0F, 0.0F, 0.0F }, { 0.0F, 0.0F }, },
@@ -1030,6 +1067,89 @@ int main()
         vkUnmapMemory(device, indexBufferMemory);
     }
 
+    // Create uniform buffer
+    {
+        VkBufferCreateInfo sceneDataBufferCreateInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        sceneDataBufferCreateInfo.flags = 0;
+        sceneDataBufferCreateInfo.size = sizeof(UniformSceneData);
+        sceneDataBufferCreateInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        sceneDataBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        if (VK_FAILED(vkCreateBuffer(device, &sceneDataBufferCreateInfo, nullptr, &sceneDataBuffer)))
+        {
+            printf("Vulkan scene data buffer create failed\n");
+            return 1;
+        }
+
+        VkMemoryRequirements memRequirements{};
+        vkGetBufferMemoryRequirements(device, sceneDataBuffer, &memRequirements);
+
+        VkMemoryAllocateInfo memoryAllocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        memoryAllocInfo.allocationSize = memRequirements.size;
+        memoryAllocInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, memRequirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        if (VK_FAILED(vkAllocateMemory(device, &memoryAllocInfo, nullptr, &sceneDataBufferMemory)))
+        {
+            printf("Vulkan scene data buffer memory allocation failed\n");
+            return 1;
+        }
+        vkBindBufferMemory(device, sceneDataBuffer, sceneDataBufferMemory, 0);
+    }
+
+    // Create descriptor pool & descriptor set
+    {
+        VkDescriptorPoolSize poolSizes[] = {
+            VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+        };
+
+        VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+        descriptorPoolCreateInfo.flags = 0;
+        descriptorPoolCreateInfo.maxSets = 1;
+        descriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
+        descriptorPoolCreateInfo.pPoolSizes = poolSizes;
+
+        if (VK_FAILED(vkCreateDescriptorPool(device, &descriptorPoolCreateInfo, nullptr, &descriptorPool)))
+        {
+            printf("Vulkan descriptor pool create failed\n");
+            return 1;
+        }
+
+        VkDescriptorSetAllocateInfo descriptorSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        descriptorSetAllocInfo.descriptorPool = descriptorPool;
+        descriptorSetAllocInfo.descriptorSetCount = 1;
+        descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayout;
+
+        if (VK_FAILED(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &descriptorSet)))
+        {
+            printf("Vulkan descriptor set allocation failed\n");
+            return 1;
+        }
+    }
+
+    // Update descriptor sets
+    {
+        VkDescriptorBufferInfo sceneDataBufferInfo{};
+        sceneDataBufferInfo.buffer = sceneDataBuffer;
+        sceneDataBufferInfo.offset = 0;
+        sceneDataBufferInfo.range = VK_WHOLE_SIZE;
+
+        VkWriteDescriptorSet writeDescriptorSet{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        writeDescriptorSet.dstSet = descriptorSet;
+        writeDescriptorSet.dstBinding = 0;
+        writeDescriptorSet.dstArrayElement = 0;
+        writeDescriptorSet.descriptorCount = 1;
+        writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writeDescriptorSet.pBufferInfo = &sceneDataBufferInfo;
+
+        vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+    }
+
+    // Map scene buffer persitently
+    UniformSceneData sceneData{};
+    void* pSceneData = nullptr;
+    vkMapMemory(device, sceneDataBufferMemory, 0, sizeof(UniformSceneData), 0, &pSceneData);
+    assert(pSceneData != nullptr);
+
     bool isRunning = true;
     while (isRunning)
     {
@@ -1056,6 +1176,14 @@ int main()
                 break;
             }
         }
+
+        // Update scene data
+        uint32_t viewportWidth = swapchainCreateInfo.imageExtent.width;
+        uint32_t viewportHeight = swapchainCreateInfo.imageExtent.height;
+        sceneData.cameraPosition = glm::vec3(0.0F, 0.0F, -5.0F);
+        sceneData.viewproject = glm::perspective(glm::radians(60.0F), static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight), 0.1F, 10.0F)
+            * glm::lookAt(sceneData.cameraPosition, glm::vec3(0.0F), glm::vec3(0.0F, 1.0F, 0.0F));
+        memcpy(pSceneData, &sceneData, sizeof(UniformSceneData));
 
         // Acquire next backbuffer
         uint32_t backbufferIndex = 0;
@@ -1108,6 +1236,8 @@ int main()
             vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
             VkBuffer vertexBuffers[] = { vertexBuffer, };
             VkDeviceSize offsets[] = { 0, };
@@ -1169,6 +1299,13 @@ int main()
 
     vkWaitForFences(device, 1, &frameReady, VK_TRUE, UINT64_MAX);
 
+    vkUnmapMemory(device, sceneDataBufferMemory);
+
+    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+
+    vkFreeMemory(device, sceneDataBufferMemory, nullptr);
+    vkDestroyBuffer(device, sceneDataBuffer, nullptr);
+
     vkFreeMemory(device, indexBufferMemory, nullptr);
     vkDestroyBuffer(device, indexBuffer, nullptr);
     vkFreeMemory(device, vertexBufferMemory, nullptr);
@@ -1176,6 +1313,7 @@ int main()
 
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
     for (auto& framebuffer : swapFramebuffers) {
         vkDestroyFramebuffer(device, framebuffer, nullptr);

@@ -11,6 +11,12 @@ layout(location = 0) out FS_IN
 	vec2 texCoord;
 } out_Result;
 
+layout(set = 0, binding = 0) uniform SCENE_DATA_UNIFORM
+{
+	vec3 cameraPosition;
+	mat4 viewproject;
+};
+
 void main()
 {
 	vec4 position = vec4(v_Position, 1);
@@ -18,5 +24,5 @@ void main()
 	out_Result.color = v_Color;
 	out_Result.texCoord = v_TexCoord;
 
-	gl_Position = position;
+	gl_Position = viewproject * position;
 }
