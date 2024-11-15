@@ -14,7 +14,7 @@ include("utils.cmake")
 include("dependencies.cmake")
 
 file(GLOB_RECURSE VK_RENDERER_SOURCES CONFIGURE_DEPENDS "src/*.cpp" "src/*.hpp")
-file(GLOB_RECURSE VK_RENDERER_SHADERS CONFIGURE_DEPENDS "src/*.glsl" "src/*.h")
+file(GLOB_RECURSE VK_RENDERER_SHADERS CONFIGURE_DEPENDS "src/*.glsl")
 add_executable(VKRenderer ${VK_RENDERER_SOURCES})
 target_include_directories(VKRenderer PRIVATE "src/")
 target_link_libraries(VKRenderer PRIVATE SDL2::SDL2 volk_headers Vulkan::Headers)
