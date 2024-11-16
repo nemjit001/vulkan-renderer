@@ -7,10 +7,16 @@
 #include <vector>
 
 #define SDL_MAIN_HANDLED
+#define STB_IMAGE_IMPLEMENTATION
 #define TINYOBJLOADER_IMPLEMENTATION
+#define VK_NO_PROTOTYPES
 #define VOLK_IMPLEMENTATION
+#include <imgui.h>
+#include <imgui_impl_sdl2.h>
+#include <imgui_impl_vulkan.h>
 #include <SDL.h>
 #include <SDL_vulkan.h>
+#include <stb_image.h>
 #include <tiny_obj_loader.h>
 #include <volk.h>
 
@@ -111,10 +117,14 @@ namespace Engine
         /// @brief Uniform scene data structure, matches data uniform available in shaders.
         struct UniformSceneData
         {
-            alignas(4)  glm::vec3 cameraPosition;
+            alignas(16)  glm::vec3 sunDirection;
+            alignas(16)  glm::vec3 sunColor;
+            alignas(16)  glm::vec3 ambientLight;
+            alignas(16)  glm::vec3 cameraPosition;
             alignas(16) glm::mat4 viewproject;
             alignas(16) glm::mat4 model;
             alignas(16) glm::mat4 normal;
+            alignas(4)  float specularity;
         };
     } // namespace
 
@@ -155,6 +165,8 @@ namespace Engine
 
     std::vector<VkFramebuffer> swapFramebuffers{};
 
+    VkDescriptorPool imguiDescriptorPool = VK_NULL_HANDLE; //< descriptor pool specifically for ImGui usage
+
     // Per pass data
     VkSampler textureSampler = VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
@@ -180,7 +192,11 @@ namespace Engine
     VkImageView normalTextureView;
 
     // CPU side render data
-    void* pSceneData = nullptr;
+    float sunAzimuth = 0.0F;
+    float sunZenith = 0.0F;
+    glm::vec3 sunColor = glm::vec3(1.0F);
+    glm::vec3 ambientLight = glm::vec3(0.1F);
+    float specularity = 0.5F;
     UniformSceneData sceneData{};
 
     namespace
@@ -528,6 +544,185 @@ namespace Engine
             return createMesh(mesh, vertices.data(), static_cast<uint32_t>(vertices.size()), indices.data(), static_cast<uint32_t>(indices.size()));
         }
 
+        /// @brief Load a texture from disk.
+        /// @param path 
+        /// @param texture 
+        /// @return A boolean indicating success.
+        bool loadTexture(char const* path, Texture& texture)
+        {
+            int width = 0, height = 0, channels = 0;
+            stbi_uc* pImageData = stbi_load(path, &width, &height, &channels, 4);
+            if (pImageData == nullptr)
+            {
+                printf("STBI image load failed [%s]\n", path);
+                return false;
+            }
+            printf("Loaded texture [%s] (%d x %d x %d)\n", path, width, height, channels);
+
+            Buffer uploadBuffer{};
+            if (!createBuffer(uploadBuffer, device, width * height * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true)) {
+                stbi_image_free(pImageData);
+                return false;
+            }
+
+            assert(uploadBuffer.mapped && uploadBuffer.pData != nullptr);
+            memcpy(uploadBuffer.pData, pImageData, uploadBuffer.size);
+
+            if (!createTexture(
+                texture,
+                device,
+                VK_IMAGE_TYPE_2D,
+                VK_FORMAT_R8G8B8A8_UNORM,
+                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1
+            )) {
+                uploadBuffer.destroy();
+                stbi_image_free(pImageData);
+                return false;
+            }
+
+            // Schedule upload using transient upload buffer
+            {
+                VkFenceCreateInfo fenceCreateInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+                VkFence uploadFence = VK_NULL_HANDLE;
+                if (VK_FAILED(vkCreateFence(device, &fenceCreateInfo, nullptr, &uploadFence)))
+                {
+                    vkDestroyFence(device, uploadFence, nullptr);
+                    uploadBuffer.destroy();
+                    stbi_image_free(pImageData);
+                    return false;
+                }
+
+                VkCommandBufferAllocateInfo uploadBufAllocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+                uploadBufAllocInfo.commandPool = commandPool;
+                uploadBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                uploadBufAllocInfo.commandBufferCount = 1;
+
+                VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
+                if (VK_FAILED(vkAllocateCommandBuffers(device, &uploadBufAllocInfo, &uploadCommandBuffer)))
+                {
+                    vkDestroyFence(device, uploadFence, nullptr);
+                    uploadBuffer.destroy();
+                    stbi_image_free(pImageData);
+                    return false;
+                }
+
+                VkCommandBufferBeginInfo uploadBeginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+                uploadBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+                uploadBeginInfo.pInheritanceInfo = nullptr;
+
+                if (VK_FAILED(vkBeginCommandBuffer(uploadCommandBuffer, &uploadBeginInfo)))
+                {
+                    vkDestroyFence(device, uploadFence, nullptr);
+                    vkFreeCommandBuffers(device, commandPool, 1, &uploadCommandBuffer);
+                    uploadBuffer.destroy();
+                    stbi_image_free(pImageData);
+                    return false;
+                }
+
+                VkImageMemoryBarrier transferBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+                transferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                transferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                transferBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                transferBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                transferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                transferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                transferBarrier.image = texture.handle;
+                transferBarrier.subresourceRange.baseMipLevel = 0;
+                transferBarrier.subresourceRange.levelCount = texture.levels;
+                transferBarrier.subresourceRange.baseArrayLayer = 0;
+                transferBarrier.subresourceRange.layerCount = texture.depthOrLayers;
+                transferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+                vkCmdPipelineBarrier(uploadCommandBuffer,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0,
+                    0, nullptr,
+                    0, nullptr,
+                    1, &transferBarrier
+                );
+
+                VkBufferImageCopy imageCopy{};
+                imageCopy.bufferOffset = 0;
+                imageCopy.bufferRowLength = width;
+                imageCopy.bufferImageHeight = height;
+                imageCopy.imageSubresource.mipLevel = 0;
+                imageCopy.imageSubresource.baseArrayLayer = 0;
+                imageCopy.imageSubresource.layerCount = 1;
+                imageCopy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                imageCopy.imageOffset = VkOffset3D{ 0, 0, 0 };
+                imageCopy.imageExtent = VkExtent3D{ static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 };
+
+                vkCmdCopyBufferToImage(
+                    uploadCommandBuffer,
+                    uploadBuffer.handle,
+                    texture.handle,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    1, &imageCopy
+                );
+
+                VkImageMemoryBarrier shaderBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+                shaderBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                shaderBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                shaderBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                shaderBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                shaderBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                shaderBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                shaderBarrier.image = texture.handle;
+                shaderBarrier.subresourceRange.baseMipLevel = 0;
+                shaderBarrier.subresourceRange.levelCount = texture.levels;
+                shaderBarrier.subresourceRange.baseArrayLayer = 0;
+                shaderBarrier.subresourceRange.layerCount = texture.depthOrLayers;
+                shaderBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+                vkCmdPipelineBarrier(uploadCommandBuffer,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    0,
+                    0, nullptr,
+                    0, nullptr,
+                    1, &shaderBarrier
+                );
+
+                if (VK_FAILED(vkEndCommandBuffer(uploadCommandBuffer)))
+                {
+                    vkDestroyFence(device, uploadFence, nullptr);
+                    vkFreeCommandBuffers(device, commandPool, 1, &uploadCommandBuffer);
+                    uploadBuffer.destroy();
+                    stbi_image_free(pImageData);
+                    return false;
+                }
+
+                VkSubmitInfo uploadSubmit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+                uploadSubmit.waitSemaphoreCount = 0;
+                uploadSubmit.pWaitSemaphores = nullptr;
+                uploadSubmit.pWaitDstStageMask = nullptr;
+                uploadSubmit.commandBufferCount = 1;
+                uploadSubmit.pCommandBuffers = &uploadCommandBuffer;
+                uploadSubmit.signalSemaphoreCount = 0;
+                uploadSubmit.pSignalSemaphores = nullptr;
+
+                if (VK_FAILED(vkQueueSubmit(directQueue, 1, &uploadSubmit, uploadFence)))
+                {
+                    vkDestroyFence(device, uploadFence, nullptr);
+                    vkFreeCommandBuffers(device, commandPool, 1, &uploadCommandBuffer);
+                    uploadBuffer.destroy();
+                    stbi_image_free(pImageData);
+                    return false;
+                }
+
+                vkWaitForFences(device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
+                vkDestroyFence(device, uploadFence, nullptr);
+                vkFreeCommandBuffers(device, commandPool, 1, &uploadCommandBuffer);
+            }
+
+            uploadBuffer.destroy();
+            stbi_image_free(pImageData);
+            return true;
+        }
+
         void Buffer::destroy()
         {
             if (mapped) {
@@ -580,6 +775,12 @@ namespace Engine
 
     bool init()
     {
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO(); (void)(io);
+        io.IniFilename = nullptr;
+
+        ImGui::StyleColorsDark();
+
         if (SDL_Init(SDL_INIT_VIDEO) != 0)
         {
             printf("SDL init failed: %s\n", SDL_GetError());
@@ -590,6 +791,12 @@ namespace Engine
         if (pWindow == nullptr)
         {
             printf("SDL window create failed: %s\n", SDL_GetError());
+            return false;
+        }
+
+        if (!ImGui_ImplSDL2_InitForVulkan(pWindow))
+        {
+            printf("ImGui init for SDL2 failed\n");
             return false;
         }
 
@@ -998,6 +1205,48 @@ namespace Engine
             }
         }
 
+        // Init ImGui for Vulkan
+        {
+            VkDescriptorPoolSize poolSizes[] = {
+                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
+            };
+
+            VkDescriptorPoolCreateInfo imguiPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+            imguiPoolCreateInfo.flags = 0;
+            imguiPoolCreateInfo.maxSets = 1;
+            imguiPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
+            imguiPoolCreateInfo.pPoolSizes = poolSizes;
+
+            if (VK_FAILED(vkCreateDescriptorPool(device, &imguiPoolCreateInfo, nullptr, &imguiDescriptorPool)))
+            {
+                printf("Vulkan imgui descriptor pool create failed\n");
+                return false;
+            }
+
+            ImGui_ImplVulkan_InitInfo initInfo{};
+            initInfo.Instance = instance;
+            initInfo.PhysicalDevice = physicalDevice;
+            initInfo.Device = device;
+            initInfo.QueueFamily = directQueueFamily;
+            initInfo.Queue = directQueue;
+            initInfo.DescriptorPool = imguiDescriptorPool;
+            initInfo.RenderPass = renderPass;
+            initInfo.MinImageCount = swapchainCreateInfo.minImageCount;
+            initInfo.ImageCount = swapchainCreateInfo.minImageCount;
+            initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+            initInfo.PipelineCache = VK_NULL_HANDLE;
+            initInfo.Subpass = 0;
+            initInfo.UseDynamicRendering = false;
+            initInfo.Allocator = nullptr;
+
+            //
+            if (!ImGui_ImplVulkan_Init(&initInfo))
+            {
+                printf("ImGui init for Vulkan failed\n");
+                return false;
+            }
+        }
+
         // Create samplers, descriptor set layouts, pipeline layout, and graphics pipeline
         {
             VkSamplerCreateInfo samplerCreateInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
@@ -1272,6 +1521,7 @@ namespace Engine
 
             VkDescriptorPoolSize poolSizes[] = {
                 VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
             };
 
             VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -1314,29 +1564,13 @@ namespace Engine
 
         // Load material data
         {
-            if (!createTexture(
-                colorTexture,
-                device,
-                VK_IMAGE_TYPE_2D,
-                VK_FORMAT_R8G8B8A8_UNORM,
-                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                512, 512, 1
-            ))
+            if (!loadTexture("data/assets/brickwall.jpg", colorTexture))
             {
                 printf("Vulkan color texture create failed\n");
                 return false;
             }
 
-            if (!createTexture(
-                normalTexture,
-                device,
-                VK_IMAGE_TYPE_2D,
-                VK_FORMAT_R8G8B8A8_UNORM,
-                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                512, 512, 1
-            ))
+            if (!loadTexture("data/assets/brickwall_normal.jpg", normalTexture))
             {
                 printf("Vulkan normal texture create failed\n");
                 return false;
@@ -1456,6 +1690,9 @@ namespace Engine
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
         vkDestroySampler(device, textureSampler, nullptr);
 
+        ImGui_ImplVulkan_Shutdown();
+        vkDestroyDescriptorPool(device, imguiDescriptorPool, nullptr);
+
         for (auto& framebuffer : swapFramebuffers) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
         }
@@ -1483,8 +1720,12 @@ namespace Engine
 #endif
         vkDestroyInstance(instance, nullptr);
         volkFinalize();
+
+        ImGui_ImplSDL2_Shutdown();
         SDL_DestroyWindow(pWindow);
         SDL_Quit();
+
+        ImGui::DestroyContext();
     }
 
     void resize()
@@ -1650,6 +1891,8 @@ namespace Engine
         SDL_Event event{};
         while (SDL_PollEvent(&event))
         {
+            ImGui_ImplSDL2_ProcessEvent(&event);
+
             switch (event.type)
             {
             case SDL_QUIT:
@@ -1670,16 +1913,55 @@ namespace Engine
             }
         }
 
-        // Update scene data
+        // Record GUI state
+        ImGui_ImplSDL2_NewFrame();
+        ImGui_ImplVulkan_NewFrame();
+        ImGui::NewFrame();
+
+        if (ImGui::Begin("Vulkan Renderer Config"))
+        {
+            ImGui::SeparatorText("Statistics");
+            ImGui::Text("Frame time: %10.2f ms", frameTimer.deltaTimeMS());
+            ImGui::Text("FPS:        %10.2f fps", 1'000.0 / frameTimer.deltaTimeMS());
+
+            ImGui::SeparatorText("Settings");
+            ImGui::RadioButton("VSync Enabled", true);
+            ImGui::RadioButton("VSync Disabled", false);
+            ImGui::RadioButton("VSync Disabled with tearing", false);
+
+            ImGui::SeparatorText("Scene");
+            ImGui::DragFloat("Sun Azimuth", &sunAzimuth, 1.0F, 0.0F, 360.0F);
+            ImGui::DragFloat("Sun Zenith", &sunZenith, 1.0F, -90.0F, 90.0F);
+            ImGui::ColorEdit3("Sun Color", &sunColor[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
+            ImGui::ColorEdit3("Ambient Light", &ambientLight[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
+
+            ImGui::SeparatorText("Material");
+            ImGui::DragFloat("Specularity", &specularity, 0.01F, 0.0F, 1.0F);
+        }
+        ImGui::End();
+
+        ImGui::Render();
+
+        // Update camera data
         camera.position = glm::vec3(2.0F, 2.0F, -5.0F);
         camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
 
+        // Update transform data
         transform.rotation = glm::rotate(transform.rotation, (float)frameTimer.deltaTimeMS() / 1000.0F, glm::vec3(0.0F, 1.0F, 0.0F));
 
+        // Update scene data
+        sceneData.sunDirection = glm::normalize(glm::vec3{
+            glm::cos(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
+            glm::cos(glm::radians(90.0F - sunZenith)),
+            glm::sin(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
+            });
+        sceneData.sunColor = sunColor;
+        sceneData.ambientLight = ambientLight;
         sceneData.cameraPosition = glm::vec3(0.0F, 0.0F, -5.0F);
         sceneData.viewproject = camera.matrix();
         sceneData.model = transform.matrix();
         sceneData.normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(sceneData.model))));
+        sceneData.specularity = specularity;
 
         // Update uniform buffer
         assert(sceneDataBuffer.mapped);
@@ -1734,17 +2016,24 @@ namespace Engine
             renderPassBeginInfo.pClearValues = clearValues;
 
             vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+            // Bind graphics pipeline
             vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
+            // Bind descriptor sets
             vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
+            // Draw mesh
             VkBuffer vertexBuffers[] = { mesh.vertexBuffer.handle, };
             VkDeviceSize offsets[] = { 0, };
             vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
             vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+
+            // Draw GUI
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 
             vkCmdEndRenderPass(commandBuffer);
 

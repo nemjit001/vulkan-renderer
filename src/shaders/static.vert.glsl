@@ -17,10 +17,14 @@ layout(location = 0) out FS_IN
 
 layout(set = 0, binding = 0) uniform SCENE_DATA_UNIFORM
 {
+	vec3 sunDirection;
+	vec3 sunColor;
+	vec3 ambientLight;
 	vec3 cameraPosition;
 	mat4 viewproject;
 	mat4 model;
 	mat4 normal;
+	float specularity;
 };
 
 void main()
