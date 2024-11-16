@@ -24,6 +24,16 @@ namespace Engine
 {
     namespace
     {
+        /// @brief Vertex struct with interleaved per-vertex data.
+        struct Vertex
+        {
+            glm::vec3 position;
+            glm::vec3 color;
+            glm::vec3 normal;
+            glm::vec3 tangent;
+            glm::vec2 texCoord;
+        };
+
         /// @brief GPU buffer with associated data.
         struct Buffer
         {
@@ -112,16 +122,6 @@ namespace Engine
     constexpr uint32_t DefaultWindowWidth = 1600;
     constexpr uint32_t DefaultWindowHeight = 900;
 
-    /// @brief Vertex struct with interleaved per-vertex data.
-    struct Vertex
-    {
-        glm::vec3 position;
-        glm::vec3 color;
-        glm::vec3 normal;
-        glm::vec3 tangent;
-        glm::vec2 texCoord;
-    };
-
     bool isRunning = true;
     SDL_Window* pWindow = nullptr;
     Timer frameTimer;
@@ -156,20 +156,22 @@ namespace Engine
 
     std::vector<VkFramebuffer> swapFramebuffers{};
 
+    // Per pass data
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
     VkViewport viewport{};
     VkRect2D scissor{};
 
+    // Scene data
+    Buffer sceneDataBuffer{};
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+
+    // Scene objects
     Camera camera{};
     Transform transform{};
     Mesh mesh{};
-
-    Buffer sceneDataBuffer{};
-
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 
     // CPU side render data
     void* pSceneData = nullptr;
@@ -1218,30 +1220,14 @@ namespace Engine
             vkDestroyShaderModule(device, vertexShader, nullptr);
         }
 
-        // Set up scene data
-        camera.position = glm::vec3(0.0F, 0.0F, -5.0F);
-        camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
-        camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
-
-        transform = Transform{};
-
-        if (!loadOBJ("data/assets/suzanne.obj", mesh))
-        {
-            printf("VK Renderer mesh load failed\n");
-            return false;
-        }
-
-        // Create uniform buffer
+        // Create uniform buffer with descriptor pool & descriptor sets
         {
             if (!createBuffer(sceneDataBuffer, device, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
             {
                 printf("Vulkan scene data buffer create failed\n");
                 return false;
             }
-        }
 
-        // Create descriptor pool & descriptor set
-        {
             VkDescriptorPoolSize poolSizes[] = {
                 VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
             };
@@ -1266,6 +1252,20 @@ namespace Engine
             if (VK_FAILED(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &descriptorSet)))
             {
                 printf("Vulkan descriptor set allocation failed\n");
+                return false;
+            }
+        }
+
+        // Set up scene data
+        {
+            camera.position = glm::vec3(0.0F, 0.0F, -5.0F);
+            camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
+            camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
+            transform = Transform{};
+
+            if (!loadOBJ("data/assets/suzanne.obj", mesh))
+            {
+                printf("VK Renderer mesh load failed\n");
                 return false;
             }
         }
@@ -1298,13 +1298,11 @@ namespace Engine
 
         vkWaitForFences(device, 1, &frameReady, VK_TRUE, UINT64_MAX);
 
-        sceneDataBuffer.unmap();
+        mesh.destroy();
 
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-
+        sceneDataBuffer.unmap();
         sceneDataBuffer.destroy();
-
-        mesh.destroy();
 
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
