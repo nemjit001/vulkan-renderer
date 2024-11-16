@@ -6,16 +6,14 @@
 #include <iostream>
 #include <vector>
 
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#define GLM_FORCE_LEFT_HANDED
-#define GLM_FORCE_RADIANS
 #define SDL_MAIN_HANDLED
 #define VOLK_IMPLEMENTATION
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 #include <SDL.h>
 #include <SDL_vulkan.h>
 #include <volk.h>
+
+#include "math.hpp"
+#include "timer.hpp"
 
 #define SIZEOF_ARRAY(val)   (sizeof((val)) / sizeof((val)[0]))
 #define VK_FAILED(expr)     ((expr) != VK_SUCCESS)
@@ -29,6 +27,8 @@ struct Vertex
 {
     glm::vec3 position;
     glm::vec3 color;
+    glm::vec3 normal;
+    glm::vec3 tangent;
     glm::vec2 texCoord;
 };
 
@@ -37,6 +37,8 @@ struct UniformSceneData
 {
     alignas(4)  glm::vec3 cameraPosition;
     alignas(16) glm::mat4 viewproject;
+    alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 normal;
 };
 
 /// @brief Vulkan debug callback.
@@ -145,6 +147,7 @@ bool readShaderFile(char const* path, std::vector<uint32_t>& shaderCode)
 }
 
 SDL_Window* pWindow;
+Timer frameTimer;
 
 VkInstance instance;
 VkDebugUtilsMessengerEXT dbgMessenger;
@@ -399,7 +402,7 @@ int main()
         appInfo.pApplicationName = "VK Renderer";
         appInfo.engineVersion = 0;
         appInfo.pEngineName = "VK Renderer";
-        appInfo.apiVersion = VK_API_VERSION_1_0;
+        appInfo.apiVersion = VK_API_VERSION_1_3;
 
         VkInstanceCreateInfo instanceCreateInfo{ VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
         instanceCreateInfo.flags = 0;
@@ -457,7 +460,27 @@ int main()
         std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
         vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices.data());
 
-        physicalDevice = physicalDevices[0];
+        physicalDevice = VK_NULL_HANDLE;
+        for (auto& device : physicalDevices)
+        {
+            VkPhysicalDeviceFeatures2 deviceFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+            deviceFeatures.pNext = nullptr;
+            vkGetPhysicalDeviceFeatures2(device, &deviceFeatures);
+
+            if (deviceFeatures.features.samplerAnisotropy == VK_TRUE
+                && deviceFeatures.features.depthBounds == VK_TRUE)
+            {
+                physicalDevice = device;
+                break;
+            }
+        }
+
+        if (physicalDevice == VK_NULL_HANDLE)
+        {
+            printf("Vulkan no supported physical device available\n");
+            return 1;
+        }
+
         vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
         directQueueFamily = findQueueFamily(physicalDevice, surface, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT | VK_QUEUE_COMPUTE_BIT, 0);
 
@@ -480,12 +503,18 @@ int main()
         directQueueCreateInfo.queueCount = SIZEOF_ARRAY(priorities);
         directQueueCreateInfo.pQueuePriorities = priorities;
 
+        VkPhysicalDeviceFeatures2 enabledFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+        enabledFeatures.features.samplerAnisotropy = VK_TRUE;
+        enabledFeatures.features.depthBounds = VK_TRUE;
+
         VkDeviceCreateInfo deviceCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
         deviceCreateInfo.flags = 0;
         deviceCreateInfo.queueCreateInfoCount = 1;
         deviceCreateInfo.pQueueCreateInfos = &directQueueCreateInfo;
         deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
         deviceCreateInfo.ppEnabledExtensionNames = extensions.data();
+        deviceCreateInfo.pEnabledFeatures = nullptr;
+        deviceCreateInfo.pNext = &enabledFeatures;
 
         if (VK_FAILED(vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device)))
         {
@@ -772,7 +801,7 @@ int main()
         sceneDataUniformBinding.binding = 0;
         sceneDataUniformBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         sceneDataUniformBinding.descriptorCount = 1;
-        sceneDataUniformBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        sceneDataUniformBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         sceneDataUniformBinding.pImmutableSamplers = nullptr;
 
         VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[] = { sceneDataUniformBinding, };
@@ -860,7 +889,9 @@ int main()
         VkVertexInputAttributeDescription vertexAttributes[] = {
             VkVertexInputAttributeDescription{ 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position) },
             VkVertexInputAttributeDescription{ 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color) },
-            VkVertexInputAttributeDescription{ 2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, texCoord) },
+            VkVertexInputAttributeDescription{ 2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal) },
+            VkVertexInputAttributeDescription{ 3, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, tangent) },
+            VkVertexInputAttributeDescription{ 4, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, texCoord) },
         };
 
         VkPipelineVertexInputStateCreateInfo vertexInputState{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
@@ -912,14 +943,14 @@ int main()
         depthStencilState.depthTestEnable = VK_TRUE;
         depthStencilState.depthWriteEnable = VK_TRUE;
         depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS;
-        depthStencilState.depthBoundsTestEnable = VK_FALSE;
+        depthStencilState.depthBoundsTestEnable = VK_TRUE;
         depthStencilState.stencilTestEnable = VK_FALSE;
         depthStencilState.front =
             VkStencilOpState{ VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, UINT32_MAX, UINT32_MAX, UINT32_MAX };
         depthStencilState.back =
             VkStencilOpState{ VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, UINT32_MAX, UINT32_MAX, UINT32_MAX };
         depthStencilState.minDepthBounds = 0.0F;
-        depthStencilState.maxDepthBounds = 0.0F;
+        depthStencilState.maxDepthBounds = 1.0F;
 
         VkPipelineColorBlendAttachmentState colorBlendAttachments[] = {
             VkPipelineColorBlendAttachmentState{
@@ -991,10 +1022,10 @@ int main()
     // Create vertex & index buffers with mesh data
     {
         Vertex vertices[] = {
-            Vertex{ { -1.0F,  1.0F, 0.0F, }, { 1.0F, 0.0F, 0.0F }, { 0.0F, 0.0F }, },
-            Vertex{ {  1.0F,  1.0F, 0.0F, }, { 0.0F, 1.0F, 0.0F }, { 1.0F, 0.0F }, },
-            Vertex{ {  1.0F, -1.0F, 0.0F, }, { 0.0F, 0.0F, 1.0F }, { 1.0F, 1.0F }, },
-            Vertex{ { -1.0F, -1.0F, 0.0F, }, { 1.0F, 1.0F, 1.0F }, { 0.0F, 1.0F }, },
+            Vertex{ { -1.0F,  1.0F, 0.0F, }, { 1.0F, 0.0F, 0.0F }, { 0.0F, 0.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 0.0F, 0.0F }, },
+            Vertex{ {  1.0F,  1.0F, 0.0F, }, { 0.0F, 1.0F, 0.0F }, { 0.0F, 0.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 1.0F, 0.0F }, },
+            Vertex{ {  1.0F, -1.0F, 0.0F, }, { 0.0F, 0.0F, 1.0F }, { 0.0F, 0.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 1.0F, 1.0F }, },
+            Vertex{ { -1.0F, -1.0F, 0.0F, }, { 1.0F, 1.0F, 1.0F }, { 0.0F, 0.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 0.0F, 1.0F }, },
         };
 
         uint32_t indices[] = {
@@ -1157,7 +1188,10 @@ int main()
     bool isRunning = true;
     while (isRunning)
     {
-        // Update SDL state
+        // Tick frame timer
+        frameTimer.tick();
+
+        // Update window state
         SDL_Event event{};
         while (SDL_PollEvent(&event))
         {
@@ -1182,11 +1216,21 @@ int main()
         }
 
         // Update scene data
+        float angle = (float)frameTimer.timeSinceStartMS() / 100.0F;
         uint32_t viewportWidth = swapchainCreateInfo.imageExtent.width;
         uint32_t viewportHeight = swapchainCreateInfo.imageExtent.height;
+
         sceneData.cameraPosition = glm::vec3(0.0F, 0.0F, -5.0F);
         sceneData.viewproject = glm::perspective(glm::radians(60.0F), static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight), 0.1F, 10.0F)
             * glm::lookAt(sceneData.cameraPosition, glm::vec3(0.0F), glm::vec3(0.0F, 1.0F, 0.0F));
+        sceneData.model = glm::rotate(
+            glm::identity<glm::mat4>(),
+            glm::radians(angle),
+            glm::vec3(0.0F, 1.0F, 0.0F)
+        );
+        sceneData.normal = glm::mat4(glm::transpose(glm::inverse(glm::mat3(sceneData.model))));
+
+        // Update uniform buffer
         memcpy(pSceneData, &sceneData, sizeof(UniformSceneData));
 
         // Acquire next backbuffer

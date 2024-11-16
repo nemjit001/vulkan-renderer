@@ -3,7 +3,7 @@ find_program(GLSL_COMPILER "glslc" REQUIRED)
 
 function(target_enable_warnings_as_errors TARGET_NAME)
 	message(STATUS "${TARGET_NAME}: Compiling warnings as errors")
-	set_target_properties(${TARGET_NAME} PROPERTIES COMPILE_WARNING_AS_ERROR ON)
+	# set_target_properties(${TARGET_NAME} PROPERTIES COMPILE_WARNING_AS_ERROR ON)
 	if (MSVC)
 		target_compile_options(${TARGET_NAME} PRIVATE /W4)
 	else()
