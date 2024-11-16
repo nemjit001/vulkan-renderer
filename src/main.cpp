@@ -7,9 +7,11 @@
 #include <vector>
 
 #define SDL_MAIN_HANDLED
+#define TINYOBJLOADER_IMPLEMENTATION
 #define VOLK_IMPLEMENTATION
 #include <SDL.h>
 #include <SDL_vulkan.h>
+#include <tiny_obj_loader.h>
 #include <volk.h>
 
 #include "math.hpp"
@@ -57,6 +59,53 @@ namespace Engine
             uint32_t depthOrLayers;
             uint32_t levels;
         };
+
+        /// @brief Simple TRS transform.
+        struct Transform
+        {
+            glm::mat4 matrix() const;
+
+            glm::vec3 position = glm::vec3(0.0F);
+            glm::quat rotation = glm::quat(1.0F, 0.0F, 0.0F, 0.0F);
+            glm::vec3 scale = glm::vec3(1.0F);
+        };
+
+        /// @brief Virtual camera.
+        struct Camera
+        {
+            glm::mat4 matrix() const;
+
+            // Camera transform
+            glm::vec3 position = glm::vec3(0.0F);
+            glm::vec3 forward = glm::vec3(0.0F, 0.0F, 1.0F);
+            glm::vec3 up = glm::vec3(0.0F, 1.0F, 0.0F);
+
+            // Perspective camera data
+            float FOVy = 60.0F;
+            float aspectRatio = 1.0F;
+            float zNear = 0.1F;
+            float zFar = 100.0F;
+        };
+
+        /// @brief Mesh representation with indexed vertices.
+        struct Mesh
+        {
+            void destroy();
+
+            uint32_t vertexCount;
+            uint32_t indexCount;
+            Buffer vertexBuffer{};
+            Buffer indexBuffer{};
+        };
+
+        /// @brief Uniform scene data structure, matches data uniform available in shaders.
+        struct UniformSceneData
+        {
+            alignas(4)  glm::vec3 cameraPosition;
+            alignas(16) glm::mat4 viewproject;
+            alignas(16) glm::mat4 model;
+            alignas(16) glm::mat4 normal;
+        };
     } // namespace
 
     constexpr char const* pWindowTitle = "Vulkan Renderer";
@@ -71,15 +120,6 @@ namespace Engine
         glm::vec3 normal;
         glm::vec3 tangent;
         glm::vec2 texCoord;
-    };
-
-    /// @brief Uniform scene data structure, matches data uniform available in shaders.
-    struct UniformSceneData
-    {
-        alignas(4)  glm::vec3 cameraPosition;
-        alignas(16) glm::mat4 viewproject;
-        alignas(16) glm::mat4 model;
-        alignas(16) glm::mat4 normal;
     };
 
     bool isRunning = true;
@@ -119,11 +159,12 @@ namespace Engine
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+    VkViewport viewport{};
+    VkRect2D scissor{};
 
-    uint32_t vertexCount = 0;
-    uint32_t indexCount = 0;
-    Buffer vertexBuffer{};
-    Buffer indexBuffer{};
+    Camera camera{};
+    Transform transform{};
+    Mesh mesh{};
 
     Buffer sceneDataBuffer{};
 
@@ -369,6 +410,116 @@ namespace Engine
             return true;
         }
 
+        /// @brief Create a mesh object.
+        /// @param mesh Mesh to initialize.
+        /// @param vertices 
+        /// @param vertexCount 
+        /// @param indices 
+        /// @param indexCount 
+        /// @return A boolean indicating success
+        bool createMesh(Mesh& mesh, Vertex* vertices, uint32_t vertexCount, uint32_t* indices, uint32_t indexCount)
+        {
+            assert(vertices != nullptr);
+            assert(indices != nullptr);
+            assert(vertexCount > 0);
+            assert(indexCount > 0);
+
+            uint32_t const vertexBufferSize = sizeof(Vertex) * vertexCount;
+            uint32_t const indexBufferSize = sizeof(uint32_t) * indexCount;
+
+            mesh.vertexCount = vertexCount;
+            mesh.indexCount = indexCount;
+
+            if (!createBuffer(mesh.vertexBuffer, device, vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+                return false;
+            }
+
+            if (!createBuffer(mesh.indexBuffer, device, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+                return false;
+            }
+
+            mesh.vertexBuffer.map();
+            memcpy(mesh.vertexBuffer.pData, vertices, vertexBufferSize);
+            mesh.vertexBuffer.unmap();
+
+            mesh.indexBuffer.map();
+            memcpy(mesh.indexBuffer.pData, indices, indexBufferSize);
+            mesh.indexBuffer.unmap();
+
+            return true;
+        }
+
+        /// @brief Load an OBJ file from disk.
+        /// @param path 
+        /// @param mesh 
+        /// @return A boolean indicating success.
+        bool loadOBJ(char const* path, Mesh& mesh)
+        {
+            tinyobj::ObjReader reader;
+            tinyobj::ObjReaderConfig config;
+
+            config.triangulate = true;
+            config.triangulation_method = "earcut";
+            config.vertex_color = true;
+
+            if (!reader.ParseFromFile(path))
+            {
+                printf("TinyOBJ OBJ load failed [%s]\n", path);
+                return false;
+            }
+            printf("Loaded OBJ mesh [%s]\n", path);
+
+            auto const& attrib = reader.GetAttrib();
+            auto const& shapes = reader.GetShapes();
+
+            std::vector<Vertex> vertices;
+            std::vector<uint32_t> indices;
+            for (auto const& shape : shapes)
+            {
+                vertices.reserve(vertices.size() + shape.mesh.indices.size());
+                indices.reserve(indices.size() + shape.mesh.indices.size());
+
+                for (auto const& index : shape.mesh.indices)
+                {
+                    size_t vertexIdx = index.vertex_index * 3;
+                    size_t normalIdx = index.normal_index * 3;
+                    size_t texIdx = index.texcoord_index * 2;
+
+                    vertices.push_back(Vertex{
+                        { attrib.vertices[vertexIdx + 0], attrib.vertices[vertexIdx + 1], attrib.vertices[vertexIdx + 2] },
+                        { attrib.colors[vertexIdx + 0], attrib.colors[vertexIdx + 1], attrib.colors[vertexIdx + 2] },
+                        { attrib.normals[normalIdx + 0], attrib.normals[normalIdx + 1], attrib.normals[normalIdx + 2] },
+                        { 0.0F, 0.0F, 0.0F }, //< tangents are calculated after loading
+                        { attrib.texcoords[texIdx + 0], attrib.texcoords[texIdx + 1] },
+                        });
+                    indices.push_back(static_cast<uint32_t>(indices.size())); //< works because mesh is triangulated
+                }
+            }
+
+            // calculate tangents based on position & texture coords
+            assert(indices.size() % 3 == 0); //< Need multiple of 3 for triangle indices
+            for (size_t i = 0; i < indices.size(); i += 3)
+            {
+                Vertex& v0 = vertices[indices[i + 0]];
+                Vertex& v1 = vertices[indices[i + 1]];
+                Vertex& v2 = vertices[indices[i + 2]];
+
+                glm::vec3 const e1 = v1.position - v0.position;
+                glm::vec3 const e2 = v2.position - v0.position;
+                glm::vec2 const dUV1 = v1.texCoord - v0.texCoord;
+                glm::vec2 const dUV2 = v2.texCoord - v0.texCoord;
+
+                float const f = 1.0F / (dUV1.x * dUV2.y - dUV1.y * dUV2.x);
+                glm::vec3 const tangent = f * (dUV2.y * e1 - dUV1.y * e2);
+
+                v0.tangent = tangent;
+                v1.tangent = tangent;
+                v2.tangent = tangent;
+            }
+
+            return createMesh(mesh, vertices.data(), static_cast<uint32_t>(vertices.size()), indices.data(), static_cast<uint32_t>(indices.size()));
+        }
+
         void Buffer::destroy()
         {
             if (mapped) {
@@ -398,6 +549,24 @@ namespace Engine
         {
             vkFreeMemory(device, memory, nullptr);
             vkDestroyImage(device, handle, nullptr);
+        }
+
+        glm::mat4 Transform::matrix() const
+        {
+            return glm::translate(glm::identity<glm::mat4>(), position)
+                * glm::mat4_cast(rotation)
+                * glm::scale(glm::identity<glm::mat4>(), scale);
+        }
+
+        glm::mat4 Camera::matrix() const
+        {
+            return glm::perspective(glm::radians(FOVy), aspectRatio, zNear, zFar) * glm::lookAt(position, position + forward, up);
+        }
+
+        void Mesh::destroy()
+        {
+            mesh.indexBuffer.destroy();
+            mesh.vertexBuffer.destroy();
         }
     } // namespace
 
@@ -934,8 +1103,10 @@ namespace Engine
             inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             inputAssemblyState.primitiveRestartEnable = VK_FALSE;
 
-            VkViewport viewport{ 0.0F, 0.0F, static_cast<float>(swapchainCreateInfo.imageExtent.width), static_cast<float>(swapchainCreateInfo.imageExtent.height), 0.0F, 1.0F };
-            VkRect2D scissor{ VkOffset2D{ 0, 0 }, swapchainCreateInfo.imageExtent };
+            float viewportWidth = static_cast<float>(swapchainCreateInfo.imageExtent.width);
+            float viewportHeight = static_cast<float>(swapchainCreateInfo.imageExtent.height);
+            viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -1.0F * viewportHeight, 0.0F, 1.0F }; // viewport height hack is needed because of OpenGL / Vulkan viewport differences
+            scissor = VkRect2D{ VkOffset2D{ 0, 0 }, swapchainCreateInfo.imageExtent };
 
             VkPipelineViewportStateCreateInfo viewportState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
             viewportState.flags = 0;
@@ -1047,42 +1218,17 @@ namespace Engine
             vkDestroyShaderModule(device, vertexShader, nullptr);
         }
 
-        // Create vertex & index buffers with mesh data
+        // Set up scene data
+        camera.position = glm::vec3(0.0F, 0.0F, -5.0F);
+        camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
+        camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
+
+        transform = Transform{};
+
+        if (!loadOBJ("data/assets/suzanne.obj", mesh))
         {
-            Vertex vertices[] = {
-                Vertex{ { -1.0F,  1.0F, 0.0F, }, { 1.0F, 0.0F, 0.0F }, { 0.0F, 0.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 0.0F, 0.0F }, },
-                Vertex{ {  1.0F,  1.0F, 0.0F, }, { 0.0F, 1.0F, 0.0F }, { 0.0F, 0.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 1.0F, 0.0F }, },
-                Vertex{ {  1.0F, -1.0F, 0.0F, }, { 0.0F, 0.0F, 1.0F }, { 0.0F, 0.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 1.0F, 1.0F }, },
-                Vertex{ { -1.0F, -1.0F, 0.0F, }, { 1.0F, 1.0F, 1.0F }, { 0.0F, 0.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 0.0F, 1.0F }, },
-            };
-
-            uint32_t indices[] = {
-                0, 1, 2,
-                2, 3, 0,
-            };
-
-            vertexCount = SIZEOF_ARRAY(vertices);
-            indexCount = SIZEOF_ARRAY(indices);
-
-            if (!createBuffer(vertexBuffer, device, sizeof(vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
-            {
-                printf("Vulkan vertex buffer create failed\n");
-                return false;
-            }
-
-            if (!createBuffer(indexBuffer, device, sizeof(vertices), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
-            {
-                printf("Vulkan vertex buffer create failed\n");
-                return false;
-            }
-
-            vertexBuffer.map();
-            memcpy(vertexBuffer.pData, vertices, sizeof(vertices));
-            vertexBuffer.unmap();
-
-            indexBuffer.map();
-            memcpy(indexBuffer.pData, indices, sizeof(indices));
-            indexBuffer.unmap();
+            printf("VK Renderer mesh load failed\n");
+            return false;
         }
 
         // Create uniform buffer
@@ -1158,8 +1304,7 @@ namespace Engine
 
         sceneDataBuffer.destroy();
 
-        indexBuffer.destroy();
-        vertexBuffer.destroy();
+        mesh.destroy();
 
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -1338,6 +1483,15 @@ namespace Engine
                 swapFramebuffers.push_back(framebuffer);
             }
         }
+
+        // Set viewport & scissor
+        float viewportWidth = static_cast<float>(width);
+        float viewportHeight = static_cast<float>(height);
+        viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -1.0F * viewportHeight, 0.0F, 1.0F }; // viewport height hack is needed because of OpenGL / Vulkan viewport differences
+        scissor = VkRect2D{ VkOffset2D{ 0, 0 }, swapchainCreateInfo.imageExtent };
+
+        // Update camera aspect ratio
+        camera.aspectRatio = static_cast<float>(width) / static_cast<float>(height);
     }
 
     void update()
@@ -1370,19 +1524,15 @@ namespace Engine
         }
 
         // Update scene data
-        float angle = (float)frameTimer.timeSinceStartMS() / 100.0F;
-        uint32_t viewportWidth = swapchainCreateInfo.imageExtent.width;
-        uint32_t viewportHeight = swapchainCreateInfo.imageExtent.height;
+        camera.position = glm::vec3(2.0F, 2.0F, -5.0F);
+        camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
+
+        transform.rotation = glm::rotate(transform.rotation, (float)frameTimer.deltaTimeMS() / 1000.0F, glm::vec3(0.0F, 1.0F, 0.0F));
 
         sceneData.cameraPosition = glm::vec3(0.0F, 0.0F, -5.0F);
-        sceneData.viewproject = glm::perspective(glm::radians(60.0F), static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight), 0.1F, 10.0F)
-            * glm::lookAt(sceneData.cameraPosition, glm::vec3(0.0F), glm::vec3(0.0F, 1.0F, 0.0F));
-        sceneData.model = glm::rotate(
-            glm::identity<glm::mat4>(),
-            glm::radians(angle),
-            glm::vec3(0.0F, 1.0F, 0.0F)
-        );
-        sceneData.normal = glm::mat4(glm::transpose(glm::inverse(glm::mat3(sceneData.model))));
+        sceneData.viewproject = camera.matrix();
+        sceneData.model = transform.matrix();
+        sceneData.normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(sceneData.model))));
 
         // Update uniform buffer
         assert(sceneDataBuffer.mapped);
@@ -1437,20 +1587,17 @@ namespace Engine
             renderPassBeginInfo.pClearValues = clearValues;
 
             vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-            VkViewport viewport{ 0.0F, 0.0F, static_cast<float>(swapExtent.width), static_cast<float>(swapExtent.height), 0.0F, 1.0F };
-            VkRect2D scissor{ VkOffset2D{ 0, 0 }, swapExtent };
             vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
             vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
-            VkBuffer vertexBuffers[] = { vertexBuffer.handle, };
+            VkBuffer vertexBuffers[] = { mesh.vertexBuffer.handle, };
             VkDeviceSize offsets[] = { 0, };
             vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(commandBuffer, indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(commandBuffer, indexCount, 1, 0, 0, 0);
+            vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
 
             vkCmdEndRenderPass(commandBuffer);
 

@@ -42,3 +42,10 @@ function(target_compile_shaders TARGET_NAME TARGET_SHADER_SOURCES)
 
 	add_dependencies(${TARGET_NAME} ${TARGET_NAME}_CompileShaders)
 endfunction()
+
+function(target_copy_data_folder TARGET_NAME)
+	add_custom_target(${TARGET_NAME}_DataCopy ALL
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/" "$<TARGET_FILE_DIR:${TARGET_NAME}>/data/"
+		COMMENT "${TARGET_NAME}: Copying data folder ${CMAKE_SOURCE_DIR}/data/ -> $<TARGET_FILE_DIR:${TARGET_NAME}>/data/"
+	)
+endfunction()
