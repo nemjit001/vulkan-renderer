@@ -20,6 +20,45 @@
 
 namespace Engine
 {
+    namespace
+    {
+        /// @brief GPU buffer with associated data.
+        struct Buffer
+        {
+            /// @brief Destroy this buffer.
+            void destroy();
+
+            /// @brief Map buffer memory.
+            void map();
+
+            /// @brief Unmap buffer memory.
+            void unmap();
+
+            VkDevice device;
+            VkBuffer handle;
+            VkDeviceMemory memory;
+            size_t size;
+            bool mapped;
+            void* pData;
+        };
+
+        /// @brief GPU texture with associated data.
+        struct Texture
+        {
+            /// @brief Destroy this texture.
+            void destroy();
+
+            VkDevice device;
+            VkImage handle;
+            VkDeviceMemory memory;
+            VkFormat format;
+            uint32_t width;
+            uint32_t height;
+            uint32_t depthOrLayers;
+            uint32_t levels;
+        };
+    } // namespace
+
     constexpr char const* pWindowTitle = "Vulkan Renderer";
     constexpr uint32_t DefaultWindowWidth = 1600;
     constexpr uint32_t DefaultWindowHeight = 900;
@@ -70,8 +109,7 @@ namespace Engine
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
 
-    VkImage depthStencilTarget = VK_NULL_HANDLE;
-    VkDeviceMemory depthStencilMemory = VK_NULL_HANDLE;
+    Texture depthStencilTexture{};
     VkImageView depthStencilView = VK_NULL_HANDLE;
 
     VkRenderPass renderPass = VK_NULL_HANDLE;
@@ -84,13 +122,10 @@ namespace Engine
 
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
-    VkBuffer vertexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
-    VkBuffer indexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory indexBufferMemory = VK_NULL_HANDLE;
+    Buffer vertexBuffer{};
+    Buffer indexBuffer{};
 
-    VkBuffer sceneDataBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory sceneDataBufferMemory = VK_NULL_HANDLE;
+    Buffer sceneDataBuffer{};
 
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
@@ -205,6 +240,145 @@ namespace Engine
 
             fclose(pFile);
             return true;
+        }
+
+        /// @brief Create a GPU buffer.
+        /// @param buffer Buffer to initialize.
+        /// @param device 
+        /// @param size Buffer size, must be greater than 0.
+        /// @param usage 
+        /// @param memoryProperties 
+        /// @param createMapped Set to true if the buffer must be mapped on creation.
+        /// @return A boolean indicating success.
+        bool createBuffer(Buffer& buffer, VkDevice device, size_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties, bool createMapped = false)
+        {
+            assert(size > 0);
+
+            buffer.device = device;
+            buffer.size = size;
+            buffer.mapped = false;
+            buffer.pData = nullptr;
+
+            VkBufferCreateInfo bufferCreateInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+            bufferCreateInfo.flags = 0;
+            bufferCreateInfo.usage = usage;
+            bufferCreateInfo.size = size;
+            bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+            if (VK_FAILED(vkCreateBuffer(device, &bufferCreateInfo, nullptr, &buffer.handle)))
+            {
+                return false;
+            }
+
+            VkMemoryRequirements memRequirements{};
+            vkGetBufferMemoryRequirements(device, buffer.handle, &memRequirements);
+
+            VkMemoryAllocateInfo allocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+            allocateInfo.allocationSize = memRequirements.size;
+            allocateInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, memRequirements, memoryProperties);
+
+            if (VK_FAILED(vkAllocateMemory(device, &allocateInfo, nullptr, &buffer.memory)))
+            {
+                return false;
+            }
+            vkBindBufferMemory(device, buffer.handle, buffer.memory, 0);
+
+            if (createMapped) {
+                buffer.map();
+            }
+
+            return true;
+        }
+
+        bool createTexture(
+            Texture& texture,
+            VkDevice device,
+            VkImageType imageType,
+            VkFormat format,
+            VkImageUsageFlags usage,
+            VkMemoryPropertyFlags memoryProperties,
+            uint32_t width,
+            uint32_t height,
+            uint32_t depth,
+            uint32_t levels = 1,
+            uint32_t layers = 1,
+            VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
+            VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL,
+            VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+        )
+        {
+            assert(depth == 1 || layers == 1); //< layers and depth may not both be >1.
+
+            texture.device = device;
+            texture.format = format;
+            texture.width = width;
+            texture.height = height;
+            texture.depthOrLayers = depth == 1 ? layers : depth;
+            texture.levels = levels;
+
+            VkImageCreateInfo imageCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+            imageCreateInfo.flags = 0;
+            imageCreateInfo.imageType = imageType;
+            imageCreateInfo.format = format;
+            imageCreateInfo.extent = VkExtent3D{ width, height, depth };
+            imageCreateInfo.mipLevels = levels;
+            imageCreateInfo.arrayLayers = layers;
+            imageCreateInfo.samples = samples;
+            imageCreateInfo.tiling = tiling;
+            imageCreateInfo.usage = usage;
+            imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            imageCreateInfo.initialLayout = initialLayout;
+
+            if (VK_FAILED(vkCreateImage(device, &imageCreateInfo, nullptr, &texture.handle)))
+            {
+                return false;
+            }
+
+            VkMemoryRequirements memRequirements{};
+            vkGetImageMemoryRequirements(device, texture.handle, &memRequirements);
+
+            VkMemoryAllocateInfo allocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+            allocateInfo.allocationSize = memRequirements.size;
+            allocateInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, memRequirements, memoryProperties);
+
+            if (VK_FAILED(vkAllocateMemory(device, &allocateInfo, nullptr, &texture.memory)))
+            {
+                return false;
+            }
+            vkBindImageMemory(device, texture.handle, texture.memory, 0);
+
+            return true;
+        }
+
+        void Buffer::destroy()
+        {
+            if (mapped) {
+                unmap();
+            }
+
+            vkFreeMemory(device, memory, nullptr);
+            vkDestroyBuffer(device, handle, nullptr);
+        }
+
+        void Buffer::map()
+        {
+            pData = nullptr;
+            vkMapMemory(device, memory, 0, size, 0, &pData);
+            assert(pData != nullptr);
+
+            mapped = true;
+        }
+
+        void Buffer::unmap()
+        {
+            vkUnmapMemory(device, memory);
+            mapped = false;
+        }
+
+        void Texture::destroy()
+        {
+            vkFreeMemory(device, memory, nullptr);
+            vkDestroyImage(device, handle, nullptr);
         }
     } // namespace
 
@@ -496,52 +670,33 @@ namespace Engine
 
         // Create depth stencil target
         {
-            VkImageCreateInfo depthStencilTargetCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-            depthStencilTargetCreateInfo.flags = 0;
-            depthStencilTargetCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-            depthStencilTargetCreateInfo.format = VK_FORMAT_D32_SFLOAT;
-            depthStencilTargetCreateInfo.extent = VkExtent3D{ swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1 };
-            depthStencilTargetCreateInfo.mipLevels = 1;
-            depthStencilTargetCreateInfo.arrayLayers = 1;
-            depthStencilTargetCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-            depthStencilTargetCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-            depthStencilTargetCreateInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            depthStencilTargetCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            depthStencilTargetCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-            if (VK_FAILED(vkCreateImage(device, &depthStencilTargetCreateInfo, nullptr, &depthStencilTarget)))
+            if (!createTexture(
+                depthStencilTexture,
+                device,
+                VK_IMAGE_TYPE_2D,
+                VK_FORMAT_D32_SFLOAT,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1
+            ))
             {
-                printf("Vulkan depth stencil create failed\n");
+                printf("Vulkan depth stencil texture create failed\n");
                 return false;
             }
-
-            VkMemoryRequirements memoryRequirements{};
-            vkGetImageMemoryRequirements(device, depthStencilTarget, &memoryRequirements);
-
-            VkMemoryAllocateInfo imageAllocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-            imageAllocateInfo.allocationSize = memoryRequirements.size;
-            imageAllocateInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, memoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-            if (VK_FAILED(vkAllocateMemory(device, &imageAllocateInfo, nullptr, &depthStencilMemory)))
-            {
-                printf("Vulkan depth stencil memory allocation failed\n");
-                return false;
-            }
-            vkBindImageMemory(device, depthStencilTarget, depthStencilMemory, 0);
 
             VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
             depthStencilViewCreateInfo.flags = 0;
-            depthStencilViewCreateInfo.image = depthStencilTarget;
+            depthStencilViewCreateInfo.image = depthStencilTexture.handle;
             depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            depthStencilViewCreateInfo.format = VK_FORMAT_D32_SFLOAT;
+            depthStencilViewCreateInfo.format = depthStencilTexture.format;
             depthStencilViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
             depthStencilViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
             depthStencilViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
             depthStencilViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
             depthStencilViewCreateInfo.subresourceRange.baseMipLevel = 0;
-            depthStencilViewCreateInfo.subresourceRange.levelCount = 1;
+            depthStencilViewCreateInfo.subresourceRange.levelCount = depthStencilTexture.levels;
             depthStencilViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-            depthStencilViewCreateInfo.subresourceRange.layerCount = 1;
+            depthStencilViewCreateInfo.subresourceRange.layerCount = depthStencilTexture.depthOrLayers;
             depthStencilViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 
             if (VK_FAILED(vkCreateImageView(device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
@@ -596,9 +751,9 @@ namespace Engine
             VkSubpassDependency previousFrameDependency{};
             previousFrameDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
             previousFrameDependency.dstSubpass = 0;
-            previousFrameDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            previousFrameDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
             previousFrameDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            previousFrameDependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            previousFrameDependency.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
             previousFrameDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
 
             VkAttachmentDescription attachments[] = { colorAttachment, depthStencilAttachment, };
@@ -885,99 +1040,34 @@ namespace Engine
             vertexCount = SIZEOF_ARRAY(vertices);
             indexCount = SIZEOF_ARRAY(indices);
 
-            VkBufferCreateInfo vertexBufferCreateInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-            vertexBufferCreateInfo.flags = 0;
-            vertexBufferCreateInfo.size = sizeof(vertices);
-            vertexBufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-            vertexBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-            if (VK_FAILED(vkCreateBuffer(device, &vertexBufferCreateInfo, nullptr, &vertexBuffer)))
+            if (!createBuffer(vertexBuffer, device, sizeof(vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
             {
                 printf("Vulkan vertex buffer create failed\n");
                 return false;
             }
 
-            VkMemoryRequirements vertexBufferMemRequirements{};
-            vkGetBufferMemoryRequirements(device, vertexBuffer, &vertexBufferMemRequirements);
-
-            VkMemoryAllocateInfo vertexBufAllocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-            vertexBufAllocInfo.allocationSize = vertexBufferMemRequirements.size;
-            vertexBufAllocInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, vertexBufferMemRequirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-            if (VK_FAILED(vkAllocateMemory(device, &vertexBufAllocInfo, nullptr, &vertexBufferMemory)))
+            if (!createBuffer(indexBuffer, device, sizeof(vertices), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
             {
-                printf("Vulkan vertex buffer memory allocation failed\n");
-                return false;
-            }
-            vkBindBufferMemory(device, vertexBuffer, vertexBufferMemory, 0);
-
-            VkBufferCreateInfo indexBufferCreateInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-            indexBufferCreateInfo.flags = 0;
-            indexBufferCreateInfo.size = sizeof(indices);
-            indexBufferCreateInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-            indexBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-            if (VK_FAILED(vkCreateBuffer(device, &indexBufferCreateInfo, nullptr, &indexBuffer)))
-            {
-                printf("Vulkan index buffer create failed\n");
+                printf("Vulkan vertex buffer create failed\n");
                 return false;
             }
 
-            VkMemoryRequirements indexBufferMemRequirements{};
-            vkGetBufferMemoryRequirements(device, indexBuffer, &indexBufferMemRequirements);
+            vertexBuffer.map();
+            memcpy(vertexBuffer.pData, vertices, sizeof(vertices));
+            vertexBuffer.unmap();
 
-            VkMemoryAllocateInfo indexBufAllocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-            indexBufAllocInfo.allocationSize = indexBufferMemRequirements.size;
-            indexBufAllocInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, indexBufferMemRequirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-            if (VK_FAILED(vkAllocateMemory(device, &indexBufAllocInfo, nullptr, &indexBufferMemory)))
-            {
-                printf("Vulkan index buffer memory allocation failed\n");
-                return false;
-            }
-            vkBindBufferMemory(device, indexBuffer, indexBufferMemory, 0);
-
-            // Copy data to buffers
-            void* pVertexBuffer = nullptr;
-            vkMapMemory(device, vertexBufferMemory, 0, sizeof(vertices), 0, &pVertexBuffer);
-            assert(pVertexBuffer != nullptr);
-            memcpy(pVertexBuffer, vertices, sizeof(vertices));
-            vkUnmapMemory(device, vertexBufferMemory);
-
-            void* pIndexBuffer = nullptr;
-            vkMapMemory(device, indexBufferMemory, 0, sizeof(indices), 0, &pIndexBuffer);
-            assert(pIndexBuffer != nullptr);
-            memcpy(pIndexBuffer, indices, sizeof(indices));
-            vkUnmapMemory(device, indexBufferMemory);
+            indexBuffer.map();
+            memcpy(indexBuffer.pData, indices, sizeof(indices));
+            indexBuffer.unmap();
         }
 
         // Create uniform buffer
         {
-            VkBufferCreateInfo sceneDataBufferCreateInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-            sceneDataBufferCreateInfo.flags = 0;
-            sceneDataBufferCreateInfo.size = sizeof(UniformSceneData);
-            sceneDataBufferCreateInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-            sceneDataBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-            if (VK_FAILED(vkCreateBuffer(device, &sceneDataBufferCreateInfo, nullptr, &sceneDataBuffer)))
+            if (!createBuffer(sceneDataBuffer, device, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
             {
                 printf("Vulkan scene data buffer create failed\n");
                 return false;
             }
-
-            VkMemoryRequirements memRequirements{};
-            vkGetBufferMemoryRequirements(device, sceneDataBuffer, &memRequirements);
-
-            VkMemoryAllocateInfo memoryAllocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-            memoryAllocInfo.allocationSize = memRequirements.size;
-            memoryAllocInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, memRequirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-            if (VK_FAILED(vkAllocateMemory(device, &memoryAllocInfo, nullptr, &sceneDataBufferMemory)))
-            {
-                printf("Vulkan scene data buffer memory allocation failed\n");
-                return false;
-            }
-            vkBindBufferMemory(device, sceneDataBuffer, sceneDataBufferMemory, 0);
         }
 
         // Create descriptor pool & descriptor set
@@ -1013,9 +1103,9 @@ namespace Engine
         // Update descriptor sets
         {
             VkDescriptorBufferInfo sceneDataBufferInfo{};
-            sceneDataBufferInfo.buffer = sceneDataBuffer;
+            sceneDataBufferInfo.buffer = sceneDataBuffer.handle;
             sceneDataBufferInfo.offset = 0;
-            sceneDataBufferInfo.range = VK_WHOLE_SIZE;
+            sceneDataBufferInfo.range = sceneDataBuffer.size;
 
             VkWriteDescriptorSet writeDescriptorSet{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             writeDescriptorSet.dstSet = descriptorSet;
@@ -1028,11 +1118,6 @@ namespace Engine
             vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
         }
 
-        // Map scene buffer persitently
-        pSceneData = nullptr;
-        vkMapMemory(device, sceneDataBufferMemory, 0, sizeof(UniformSceneData), 0, &pSceneData);
-        assert(pSceneData != nullptr);
-
         printf("Initialized Vulkan Renderer\n");
         return true;
     }
@@ -1043,17 +1128,14 @@ namespace Engine
 
         vkWaitForFences(device, 1, &frameReady, VK_TRUE, UINT64_MAX);
 
-        vkUnmapMemory(device, sceneDataBufferMemory);
+        sceneDataBuffer.unmap();
 
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
-        vkFreeMemory(device, sceneDataBufferMemory, nullptr);
-        vkDestroyBuffer(device, sceneDataBuffer, nullptr);
+        sceneDataBuffer.destroy();
 
-        vkFreeMemory(device, indexBufferMemory, nullptr);
-        vkDestroyBuffer(device, indexBuffer, nullptr);
-        vkFreeMemory(device, vertexBufferMemory, nullptr);
-        vkDestroyBuffer(device, vertexBuffer, nullptr);
+        indexBuffer.destroy();
+        vertexBuffer.destroy();
 
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -1065,8 +1147,7 @@ namespace Engine
         vkDestroyRenderPass(device, renderPass, nullptr);
 
         vkDestroyImageView(device, depthStencilView, nullptr);
-        vkFreeMemory(device, depthStencilMemory, nullptr);
-        vkDestroyImage(device, depthStencilTarget, nullptr);
+        depthStencilTexture.destroy();
 
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         vkDestroyCommandPool(device, commandPool, nullptr);
@@ -1109,8 +1190,7 @@ namespace Engine
         // Destroy swap dependent resources
         {
             vkDestroyImageView(device, depthStencilView, nullptr);
-            vkFreeMemory(device, depthStencilMemory, nullptr);
-            vkDestroyImage(device, depthStencilTarget, nullptr);
+            depthStencilTexture.destroy();
 
             for (auto& framebuffer : swapFramebuffers) {
                 vkDestroyFramebuffer(device, framebuffer, nullptr);
@@ -1178,52 +1258,33 @@ namespace Engine
 
         // Recreate swap dependent resources
         {
-            VkImageCreateInfo depthStencilTargetCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-            depthStencilTargetCreateInfo.flags = 0;
-            depthStencilTargetCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-            depthStencilTargetCreateInfo.format = VK_FORMAT_D32_SFLOAT;
-            depthStencilTargetCreateInfo.extent = VkExtent3D{ swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1 };
-            depthStencilTargetCreateInfo.mipLevels = 1;
-            depthStencilTargetCreateInfo.arrayLayers = 1;
-            depthStencilTargetCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-            depthStencilTargetCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-            depthStencilTargetCreateInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            depthStencilTargetCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            depthStencilTargetCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-            if (VK_FAILED(vkCreateImage(device, &depthStencilTargetCreateInfo, nullptr, &depthStencilTarget)))
+            if (!createTexture(
+                depthStencilTexture,
+                device,
+                VK_IMAGE_TYPE_2D,
+                VK_FORMAT_D32_SFLOAT,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1
+            ))
             {
-                printf("Vulkan depth stencil create failed\n");
+                printf("Vulkan depth stencil texture create failed\n");
                 return;
             }
-
-            VkMemoryRequirements memoryRequirements{};
-            vkGetImageMemoryRequirements(device, depthStencilTarget, &memoryRequirements);
-
-            VkMemoryAllocateInfo imageAllocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-            imageAllocateInfo.allocationSize = memoryRequirements.size;
-            imageAllocateInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, memoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-            if (VK_FAILED(vkAllocateMemory(device, &imageAllocateInfo, nullptr, &depthStencilMemory)))
-            {
-                printf("Vulkan depth stencil memory allocation failed\n");
-                return;
-            }
-            vkBindImageMemory(device, depthStencilTarget, depthStencilMemory, 0);
 
             VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
             depthStencilViewCreateInfo.flags = 0;
-            depthStencilViewCreateInfo.image = depthStencilTarget;
+            depthStencilViewCreateInfo.image = depthStencilTexture.handle;
             depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            depthStencilViewCreateInfo.format = VK_FORMAT_D32_SFLOAT;
+            depthStencilViewCreateInfo.format = depthStencilTexture.format;
             depthStencilViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
             depthStencilViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
             depthStencilViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
             depthStencilViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
             depthStencilViewCreateInfo.subresourceRange.baseMipLevel = 0;
-            depthStencilViewCreateInfo.subresourceRange.levelCount = 1;
+            depthStencilViewCreateInfo.subresourceRange.levelCount = depthStencilTexture.levels;
             depthStencilViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-            depthStencilViewCreateInfo.subresourceRange.layerCount = 1;
+            depthStencilViewCreateInfo.subresourceRange.layerCount = depthStencilTexture.depthOrLayers;
             depthStencilViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 
             if (VK_FAILED(vkCreateImageView(device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
@@ -1300,7 +1361,8 @@ namespace Engine
         sceneData.normal = glm::mat4(glm::transpose(glm::inverse(glm::mat3(sceneData.model))));
 
         // Update uniform buffer
-        memcpy(pSceneData, &sceneData, sizeof(UniformSceneData));
+        assert(sceneDataBuffer.mapped);
+        memcpy(sceneDataBuffer.pData, &sceneData, sizeof(UniformSceneData));
     }
 
     void render()
@@ -1360,10 +1422,10 @@ namespace Engine
 
             vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
-            VkBuffer vertexBuffers[] = { vertexBuffer, };
+            VkBuffer vertexBuffers[] = { vertexBuffer.handle, };
             VkDeviceSize offsets[] = { 0, };
             vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindIndexBuffer(commandBuffer, indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(commandBuffer, indexCount, 1, 0, 0, 0);
 
             vkCmdEndRenderPass(commandBuffer);
