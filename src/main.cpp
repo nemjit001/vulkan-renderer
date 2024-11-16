@@ -509,10 +509,15 @@ namespace Engine
                 deviceFeatures.pNext = nullptr;
                 vkGetPhysicalDeviceFeatures2(device, &deviceFeatures);
 
+                VkPhysicalDeviceProperties2 deviceProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+                deviceProperties.pNext = nullptr;
+                vkGetPhysicalDeviceProperties2(device, &deviceProperties);
+
                 if (deviceFeatures.features.samplerAnisotropy == VK_TRUE
                     && deviceFeatures.features.depthBounds == VK_TRUE)
                 {
                     physicalDevice = device;
+                    printf("Automatically selected render device: %s\n", deviceProperties.properties.deviceName);
                     break;
                 }
             }
