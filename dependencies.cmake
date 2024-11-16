@@ -17,6 +17,7 @@ add_library(imgui STATIC "vendored/imgui/imgui.cpp" "vendored/imgui/imgui_demo.c
 )
 target_include_directories(imgui PUBLIC "vendored/imgui/" "vendored/imgui/backends/")
 target_link_libraries(imgui PUBLIC SDL2::SDL2 Vulkan::Headers)
+target_compile_definitions(imgui PUBLIC IMGUI_IMPL_VULKAN_NO_PROTOTYPES) # Definitions required by imgui to use vulkan loader
 add_library(vendored::imgui ALIAS imgui)
 
 add_library(stb INTERFACE)

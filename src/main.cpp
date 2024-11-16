@@ -1212,7 +1212,7 @@ namespace Engine
             };
 
             VkDescriptorPoolCreateInfo imguiPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-            imguiPoolCreateInfo.flags = 0;
+            imguiPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
             imguiPoolCreateInfo.maxSets = 1;
             imguiPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
             imguiPoolCreateInfo.pPoolSizes = poolSizes;
@@ -1239,8 +1239,9 @@ namespace Engine
             initInfo.UseDynamicRendering = false;
             initInfo.Allocator = nullptr;
 
-            //
-            if (!ImGui_ImplVulkan_Init(&initInfo))
+            auto imguiLoadFunc = [](char const* pName, void* pUserData) { (void)(pUserData); return vkGetInstanceProcAddr(instance, pName); };
+            if (!ImGui_ImplVulkan_LoadFunctions(imguiLoadFunc, nullptr)
+                || !ImGui_ImplVulkan_Init(&initInfo))
             {
                 printf("ImGui init for Vulkan failed\n");
                 return false;
