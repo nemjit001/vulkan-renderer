@@ -44,55 +44,56 @@ namespace Engine
     };
 
     bool isRunning = true;
-    SDL_Window* pWindow;
+    SDL_Window* pWindow = nullptr;
     Timer frameTimer;
 
-    VkInstance instance;
-    VkDebugUtilsMessengerEXT dbgMessenger;
-    VkSurfaceKHR surface;
+    VkInstance instance = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT dbgMessenger = VK_NULL_HANDLE;
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
 
-    VkPhysicalDevice physicalDevice;
-    VkPhysicalDeviceMemoryProperties deviceMemoryProperties;
-    uint32_t directQueueFamily;
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+    VkPhysicalDeviceMemoryProperties deviceMemoryProperties{};
+    uint32_t directQueueFamily = VK_QUEUE_FAMILY_IGNORED;
 
-    VkDevice device;
-    VkQueue directQueue;
+    VkDevice device = VK_NULL_HANDLE;
+    VkQueue directQueue = VK_NULL_HANDLE;
 
-    VkSwapchainCreateInfoKHR swapchainCreateInfo;
-    VkSwapchainKHR swapchain;
-    std::vector<VkImage> swapImages;
-    std::vector<VkImageView> swapImageViews;
+    VkSwapchainCreateInfoKHR swapchainCreateInfo{};
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+    std::vector<VkImage> swapImages{};
+    std::vector<VkImageView> swapImageViews{};
 
-    VkSemaphore swapAvailable;
-    VkSemaphore swapReleased;
-    VkFence frameReady;
+    VkSemaphore swapAvailable = VK_NULL_HANDLE;
+    VkSemaphore swapReleased = VK_NULL_HANDLE;
+    VkFence frameReady = VK_NULL_HANDLE;
 
-    VkCommandPool commandPool;
-    VkCommandBuffer commandBuffer;
+    VkCommandPool commandPool = VK_NULL_HANDLE;
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
 
-    VkImage depthStencilTarget;
-    VkDeviceMemory depthStencilMemory;
-    VkImageView depthStencilView;
+    VkImage depthStencilTarget = VK_NULL_HANDLE;
+    VkDeviceMemory depthStencilMemory = VK_NULL_HANDLE;
+    VkImageView depthStencilView = VK_NULL_HANDLE;
 
-    VkRenderPass renderPass;
-    std::vector<VkFramebuffer> swapFramebuffers;
+    VkRenderPass renderPass = VK_NULL_HANDLE;
 
-    VkDescriptorSetLayout descriptorSetLayout;
-    VkPipelineLayout pipelineLayout;
-    VkPipeline graphicsPipeline;
+    std::vector<VkFramebuffer> swapFramebuffers{};
 
-    uint32_t vertexCount;
-    uint32_t indexCount;
-    VkBuffer vertexBuffer;
-    VkDeviceMemory vertexBufferMemory;
-    VkBuffer indexBuffer;
-    VkDeviceMemory indexBufferMemory;
+    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    VkPipeline graphicsPipeline = VK_NULL_HANDLE;
 
-    VkBuffer sceneDataBuffer;
-    VkDeviceMemory sceneDataBufferMemory;
+    uint32_t vertexCount = 0;
+    uint32_t indexCount = 0;
+    VkBuffer vertexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
+    VkBuffer indexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory indexBufferMemory = VK_NULL_HANDLE;
 
-    VkDescriptorPool descriptorPool;
-    VkDescriptorSet descriptorSet;
+    VkBuffer sceneDataBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory sceneDataBufferMemory = VK_NULL_HANDLE;
+
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 
     // CPU side render data
     void* pSceneData = nullptr;
@@ -101,11 +102,11 @@ namespace Engine
     namespace
     {
         /// @brief Vulkan debug callback.
-    /// @param severity 
-    /// @param type 
-    /// @param pCallbackData 
-    /// @param pUserData 
-    /// @return VK_FALSE as per Vulkan spec.
+        /// @param severity 
+        /// @param type 
+        /// @param pCallbackData 
+        /// @param pUserData 
+        /// @return VK_FALSE as per Vulkan spec.
         VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
             VkDebugUtilsMessageSeverityFlagBitsEXT severity,
             VkDebugUtilsMessageTypeFlagsEXT type,
@@ -580,29 +581,29 @@ namespace Engine
 
             VkAttachmentReference depthStencilAttachmentRef{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
 
-            VkSubpassDescription subpass{};
-            subpass.flags = 0;
-            subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-            subpass.inputAttachmentCount = 0;
-            subpass.pInputAttachments = nullptr;
-            subpass.colorAttachmentCount = SIZEOF_ARRAY(colorAttachmentRefs);
-            subpass.pColorAttachments = colorAttachmentRefs;
-            subpass.pResolveAttachments = nullptr;
-            subpass.pDepthStencilAttachment = &depthStencilAttachmentRef;
-            subpass.preserveAttachmentCount = 0;
-            subpass.pPreserveAttachments = nullptr;
+            VkSubpassDescription forwardPass{};
+            forwardPass.flags = 0;
+            forwardPass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+            forwardPass.inputAttachmentCount = 0;
+            forwardPass.pInputAttachments = nullptr;
+            forwardPass.colorAttachmentCount = SIZEOF_ARRAY(colorAttachmentRefs);
+            forwardPass.pColorAttachments = colorAttachmentRefs;
+            forwardPass.pResolveAttachments = nullptr;
+            forwardPass.pDepthStencilAttachment = &depthStencilAttachmentRef;
+            forwardPass.preserveAttachmentCount = 0;
+            forwardPass.pPreserveAttachments = nullptr;
 
-            VkSubpassDependency dependency{};
-            dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-            dependency.dstSubpass = 0;
-            dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-            dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+            VkSubpassDependency previousFrameDependency{};
+            previousFrameDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+            previousFrameDependency.dstSubpass = 0;
+            previousFrameDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            previousFrameDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            previousFrameDependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            previousFrameDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
 
             VkAttachmentDescription attachments[] = { colorAttachment, depthStencilAttachment, };
-            VkSubpassDescription subpasses[] = { subpass, };
-            VkSubpassDependency dependencies[] = { dependency, };
+            VkSubpassDescription subpasses[] = { forwardPass, };
+            VkSubpassDependency dependencies[] = { previousFrameDependency, };
             VkRenderPassCreateInfo renderPassCreateInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
             renderPassCreateInfo.flags = 0;
             renderPassCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
