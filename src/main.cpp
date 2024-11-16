@@ -141,6 +141,8 @@ namespace Engine
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     std::vector<VkImage> swapImages{};
     std::vector<VkImageView> swapImageViews{};
+    Texture depthStencilTexture{};
+    VkImageView depthStencilView = VK_NULL_HANDLE;
 
     VkSemaphore swapAvailable = VK_NULL_HANDLE;
     VkSemaphore swapReleased = VK_NULL_HANDLE;
@@ -148,9 +150,6 @@ namespace Engine
 
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-
-    Texture depthStencilTexture{};
-    VkImageView depthStencilView = VK_NULL_HANDLE;
 
     VkRenderPass renderPass = VK_NULL_HANDLE;
 
@@ -820,6 +819,42 @@ namespace Engine
                 assert(view != VK_NULL_HANDLE);
                 swapImageViews.push_back(view);
             }
+
+            // Create depth stencil target
+            if (!createTexture(
+                depthStencilTexture,
+                device,
+                VK_IMAGE_TYPE_2D,
+                VK_FORMAT_D32_SFLOAT,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1
+            ))
+            {
+                printf("Vulkan depth stencil texture create failed\n");
+                return false;
+            }
+
+            VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+            depthStencilViewCreateInfo.flags = 0;
+            depthStencilViewCreateInfo.image = depthStencilTexture.handle;
+            depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            depthStencilViewCreateInfo.format = depthStencilTexture.format;
+            depthStencilViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.subresourceRange.baseMipLevel = 0;
+            depthStencilViewCreateInfo.subresourceRange.levelCount = depthStencilTexture.levels;
+            depthStencilViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+            depthStencilViewCreateInfo.subresourceRange.layerCount = depthStencilTexture.depthOrLayers;
+            depthStencilViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+            if (VK_FAILED(vkCreateImageView(device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
+            {
+                printf("Vulkan depth stencil view create failed\n");
+                return false;
+            }
         }
 
         // Create synchronization primitives
@@ -859,44 +894,6 @@ namespace Engine
             if (VK_FAILED(vkAllocateCommandBuffers(device, &commandBufAllocInfo, &commandBuffer)))
             {
                 printf("Vulkan command buffer allocation failed\n");
-                return false;
-            }
-        }
-
-        // Create depth stencil target
-        {
-            if (!createTexture(
-                depthStencilTexture,
-                device,
-                VK_IMAGE_TYPE_2D,
-                VK_FORMAT_D32_SFLOAT,
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1
-            ))
-            {
-                printf("Vulkan depth stencil texture create failed\n");
-                return false;
-            }
-
-            VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-            depthStencilViewCreateInfo.flags = 0;
-            depthStencilViewCreateInfo.image = depthStencilTexture.handle;
-            depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            depthStencilViewCreateInfo.format = depthStencilTexture.format;
-            depthStencilViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.subresourceRange.baseMipLevel = 0;
-            depthStencilViewCreateInfo.subresourceRange.levelCount = depthStencilTexture.levels;
-            depthStencilViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-            depthStencilViewCreateInfo.subresourceRange.layerCount = depthStencilTexture.depthOrLayers;
-            depthStencilViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-
-            if (VK_FAILED(vkCreateImageView(device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
-            {
-                printf("Vulkan depth stencil view create failed\n");
                 return false;
             }
         }
@@ -1313,9 +1310,6 @@ namespace Engine
         }
         vkDestroyRenderPass(device, renderPass, nullptr);
 
-        vkDestroyImageView(device, depthStencilView, nullptr);
-        depthStencilTexture.destroy();
-
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         vkDestroyCommandPool(device, commandPool, nullptr);
 
@@ -1323,6 +1317,8 @@ namespace Engine
         vkDestroySemaphore(device, swapReleased, nullptr);
         vkDestroySemaphore(device, swapAvailable, nullptr);
 
+        vkDestroyImageView(device, depthStencilView, nullptr);
+        depthStencilTexture.destroy();
         for (auto& view : swapImageViews) {
             vkDestroyImageView(device, view, nullptr);
         }
@@ -1356,9 +1352,6 @@ namespace Engine
 
         // Destroy swap dependent resources
         {
-            vkDestroyImageView(device, depthStencilView, nullptr);
-            depthStencilTexture.destroy();
-
             for (auto& framebuffer : swapFramebuffers) {
                 vkDestroyFramebuffer(device, framebuffer, nullptr);
             }
@@ -1367,6 +1360,10 @@ namespace Engine
 
         // Recreate swap chain & swap resources
         {
+            // Destroy depth stencil texture & view
+            vkDestroyImageView(device, depthStencilView, nullptr);
+            depthStencilTexture.destroy();
+
             // Destroy swap views
             for (auto& view : swapImageViews) {
                 vkDestroyImageView(device, view, nullptr);
@@ -1421,10 +1418,8 @@ namespace Engine
                 assert(view != VK_NULL_HANDLE);
                 swapImageViews.push_back(view);
             }
-        }
 
-        // Recreate swap dependent resources
-        {
+            // Create depth stencil texture & view
             if (!createTexture(
                 depthStencilTexture,
                 device,
@@ -1436,7 +1431,7 @@ namespace Engine
             ))
             {
                 printf("Vulkan depth stencil texture create failed\n");
-                return;
+                isRunning = false;
             }
 
             VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
@@ -1457,9 +1452,12 @@ namespace Engine
             if (VK_FAILED(vkCreateImageView(device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
             {
                 printf("Vulkan depth stencil view create failed\n");
-                return;
+                isRunning = false;
             }
+        }
 
+        // Recreate swap dependent resources
+        {
             swapFramebuffers.reserve(swapImageViews.size());
             for (auto& swapView : swapImageViews)
             {
