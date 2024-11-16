@@ -290,6 +290,22 @@ namespace Engine
             return true;
         }
 
+        /// @brief Create a GPU texture.
+        /// @param texture Texture to initialize.
+        /// @param device 
+        /// @param imageType 
+        /// @param format 
+        /// @param usage 
+        /// @param memoryProperties 
+        /// @param width Texture width, must be greater than 0.
+        /// @param height Texture height, must be greater than 0.
+        /// @param depth Texture depth, must be greater than 0.
+        /// @param levels Texture mip levels, must be greater than 0.
+        /// @param layers Texture layers, if depth > 1 this must be 1.
+        /// @param samples 
+        /// @param tiling 
+        /// @param initialLayout 
+        /// @return A boolean indicating success.
         bool createTexture(
             Texture& texture,
             VkDevice device,
@@ -307,6 +323,9 @@ namespace Engine
             VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
         )
         {
+            assert(width > 0 && height > 0 && depth > 0);
+            assert(levels > 0);
+            assert(layers > 0);
             assert(depth == 1 || layers == 1); //< layers and depth may not both be >1.
 
             texture.device = device;
