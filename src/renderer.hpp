@@ -55,12 +55,27 @@ public:
 	RenderDeviceContext(RenderDeviceContext const&) = delete;
 	RenderDeviceContext& operator=(RenderDeviceContext const&) = delete;
 
+	/// @brief Start a new frame, acquiring the next available backbuffer.
+	/// @return 
 	bool newFrame();
 
+	/// @brief present the currently acquired frame.
+	/// @return 
 	bool present();
 
+	/// @brief Resize swap dependent resources (swap framebuffers, color targets, depth target, etc.).
+	/// @param width 
+	/// @param height 
+	/// @return 
 	bool resizeSwapResources(uint32_t width, uint32_t height);
 
+	/// @brief Create a GPU buffer.
+	/// @param buffer 
+	/// @param size 
+	/// @param usage 
+	/// @param memoryProperties 
+	/// @param createMapped 
+	/// @return 
 	bool createBuffer(
 		Buffer& buffer,
 		size_t size,
@@ -69,6 +84,21 @@ public:
 		bool createMapped = false
 	);
 
+	/// @brief Create a GPU texture.
+	/// @param texture 
+	/// @param imageType 
+	/// @param format 
+	/// @param usage 
+	/// @param memoryProperties 
+	/// @param width 
+	/// @param height 
+	/// @param depth 
+	/// @param levels 
+	/// @param layers 
+	/// @param samples 
+	/// @param tiling 
+	/// @param initialLayout 
+	/// @return 
 	bool createTexture(
 		Texture& texture,
 		VkImageType imageType,
@@ -85,6 +115,8 @@ public:
 		VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
 	);
 
+	/// @brief Retrieve the current backbuffer index.
+	/// @return 
 	uint32_t getCurrentBackbufferIndex() const;
 
 private:
