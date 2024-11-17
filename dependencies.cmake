@@ -10,10 +10,10 @@ add_subdirectory("${VENDORED_BASE_DIR}/SDL/")
 add_subdirectory("${VENDORED_BASE_DIR}/tinyobjloader/")
 add_subdirectory("${VENDORED_BASE_DIR}/volk/")
 
-add_library(imgui STATIC "vendored/imgui/imgui.cpp" "vendored/imgui/imgui_demo.cpp" "vendored/imgui/imgui_draw.cpp"
-	"vendored/imgui/imgui_tables.cpp" "vendored/imgui/imgui_widgets.cpp"
-	"vendored/imgui/backends/imgui_impl_sdl2.cpp"   # SDL2 hook
-	"vendored/imgui/backends/imgui_impl_vulkan.cpp" # Vulkan hook
+add_library(imgui STATIC "${VENDORED_BASE_DIR}/imgui/imgui.cpp" "${VENDORED_BASE_DIR}/imgui/imgui_demo.cpp" "${VENDORED_BASE_DIR}/imgui/imgui_draw.cpp"
+	"${VENDORED_BASE_DIR}/imgui/imgui_tables.cpp" "${VENDORED_BASE_DIR}/imgui/imgui_widgets.cpp"
+	"${VENDORED_BASE_DIR}/imgui/backends/imgui_impl_sdl2.cpp"   # SDL2 hook
+	"${VENDORED_BASE_DIR}/imgui/backends/imgui_impl_vulkan.cpp" # Vulkan hook
 )
 target_include_directories(imgui PUBLIC "vendored/imgui/" "vendored/imgui/backends/")
 target_link_libraries(imgui PUBLIC SDL2::SDL2 Vulkan::Headers)
