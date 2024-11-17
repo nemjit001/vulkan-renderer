@@ -26,74 +26,83 @@
 
 namespace Engine
 {
-    namespace
+    /// @brief Vertex struct with interleaved per-vertex data.
+    struct Vertex
     {
-        /// @brief Vertex struct with interleaved per-vertex data.
-        struct Vertex
+        glm::vec3 position;
+        glm::vec3 color;
+        glm::vec3 normal;
+        glm::vec3 tangent;
+        glm::vec2 texCoord;
+    };
+
+    /// @brief Simple TRS transform.
+    struct Transform
+    {
+        /// @brief Calculate the transformation matrix for this transform.
+        /// @return 
+        glm::mat4 matrix() const
         {
-            glm::vec3 position;
-            glm::vec3 color;
-            glm::vec3 normal;
-            glm::vec3 tangent;
-            glm::vec2 texCoord;
-        };
+            return glm::translate(glm::identity<glm::mat4>(), position)
+                * glm::mat4_cast(rotation)
+                * glm::scale(glm::identity<glm::mat4>(), scale);
+        }
 
-        /// @brief Simple TRS transform.
-        struct Transform
+        glm::vec3 position = glm::vec3(0.0F);
+        glm::quat rotation = glm::quat(1.0F, 0.0F, 0.0F, 0.0F);
+        glm::vec3 scale = glm::vec3(1.0F);
+    };
+
+    /// @brief Virtual camera.
+    struct Camera
+    {
+        /// @brief Calculate the view and projection matrix for this camera.
+        /// @return 
+        glm::mat4 matrix() const
         {
-            /// @brief Calculate the transformation matrix for this transform.
-            /// @return 
-            glm::mat4 matrix() const;
+            return glm::perspective(glm::radians(FOVy), aspectRatio, zNear, zFar) * glm::lookAt(position, position + forward, up);
+        }
 
-            glm::vec3 position = glm::vec3(0.0F);
-            glm::quat rotation = glm::quat(1.0F, 0.0F, 0.0F, 0.0F);
-            glm::vec3 scale = glm::vec3(1.0F);
-        };
+        // Camera transform
+        glm::vec3 position = glm::vec3(0.0F);
+        glm::vec3 forward = glm::vec3(0.0F, 0.0F, 1.0F);
+        glm::vec3 up = glm::vec3(0.0F, 1.0F, 0.0F);
 
-        /// @brief Virtual camera.
-        struct Camera
+        // Perspective camera data
+        float FOVy = 60.0F;
+        float aspectRatio = 1.0F;
+        float zNear = 0.1F;
+        float zFar = 100.0F;
+    };
+
+    /// @brief Mesh representation with indexed vertices.
+    struct Mesh
+    {
+        /// @brief Destroy this mesh.
+        void destroy()
         {
-            /// @brief Calculate the view and projection matrix for this camera.
-            /// @return 
-            glm::mat4 matrix() const;
+            indexBuffer.destroy();
+            vertexBuffer.destroy();
+        }
 
-            // Camera transform
-            glm::vec3 position = glm::vec3(0.0F);
-            glm::vec3 forward = glm::vec3(0.0F, 0.0F, 1.0F);
-            glm::vec3 up = glm::vec3(0.0F, 1.0F, 0.0F);
+        uint32_t vertexCount;
+        uint32_t indexCount;
+        Buffer vertexBuffer{};
+        Buffer indexBuffer{};
+    };
 
-            // Perspective camera data
-            float FOVy = 60.0F;
-            float aspectRatio = 1.0F;
-            float zNear = 0.1F;
-            float zFar = 100.0F;
-        };
-
-        /// @brief Mesh representation with indexed vertices.
-        struct Mesh
-        {
-            /// @brief Destroy this mesh.
-            void destroy();
-
-            uint32_t vertexCount;
-            uint32_t indexCount;
-            Buffer vertexBuffer{};
-            Buffer indexBuffer{};
-        };
-
-        /// @brief Uniform scene data structure, matches data uniform available in shaders.
-        struct UniformSceneData
-        {
-            alignas(16) glm::vec3 sunDirection;
-            alignas(16) glm::vec3 sunColor;
-            alignas(16) glm::vec3 ambientLight;
-            alignas(16) glm::vec3 cameraPosition;
-            alignas(16) glm::mat4 viewproject;
-            alignas(16) glm::mat4 model;
-            alignas(16) glm::mat4 normal;
-            alignas(4)  float specularity;
-        };
-    } // namespace
+    /// @brief Uniform scene data structure, matches data uniform available in shaders.
+    struct UniformSceneData
+    {
+        alignas(16) glm::vec3 sunDirection;
+        alignas(16) glm::vec3 sunColor;
+        alignas(16) glm::vec3 ambientLight;
+        alignas(16) glm::vec3 cameraPosition;
+        alignas(16) glm::mat4 viewproject;
+        alignas(16) glm::mat4 model;
+        alignas(16) glm::mat4 normal;
+        alignas(4)  float specularity;
+    };
 
     constexpr char const* pWindowTitle = "Vulkan Renderer";
     constexpr uint32_t DefaultWindowWidth = 1600;
@@ -139,7 +148,7 @@ namespace Engine
     float specularity = 0.5F;
     UniformSceneData sceneData{};
 
-    namespace
+    namespace VulkanHelpers
     {
         /// @brief Read a binary shader file.
         /// @param path Path to the shader file.
@@ -454,25 +463,7 @@ namespace Engine
             stbi_image_free(pImageData);
             return true;
         }
-
-        glm::mat4 Transform::matrix() const
-        {
-            return glm::translate(glm::identity<glm::mat4>(), position)
-                * glm::mat4_cast(rotation)
-                * glm::scale(glm::identity<glm::mat4>(), scale);
-        }
-
-        glm::mat4 Camera::matrix() const
-        {
-            return glm::perspective(glm::radians(FOVy), aspectRatio, zNear, zFar) * glm::lookAt(position, position + forward, up);
-        }
-
-        void Mesh::destroy()
-        {
-            mesh.indexBuffer.destroy();
-            mesh.vertexBuffer.destroy();
-        }
-    } // namespace
+    } // namespace VulkanHelpers
 
     bool init()
     {
@@ -625,7 +616,7 @@ namespace Engine
             }
 
             std::vector<uint32_t> vertexShaderCode;
-            if (!readShaderFile("static.vert.spv", vertexShaderCode))
+            if (!VulkanHelpers::readShaderFile("static.vert.spv", vertexShaderCode))
             {
                 printf("VK Renderer vertex shader read failed\n");
                 return false;
@@ -644,7 +635,7 @@ namespace Engine
             }
 
             std::vector<uint32_t> fragmentShaderCode;
-            if (!readShaderFile("forward.frag.spv", fragmentShaderCode))
+            if (!VulkanHelpers::readShaderFile("forward.frag.spv", fragmentShaderCode))
             {
                 printf("VK Renderer fragment shader read failed\n");
                 return false;
@@ -859,7 +850,7 @@ namespace Engine
             camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
             transform = Transform{};
 
-            if (!loadOBJ("data/assets/suzanne.obj", mesh))
+            if (!VulkanHelpers::loadOBJ("data/assets/suzanne.obj", mesh))
             {
                 printf("VK Renderer mesh load failed\n");
                 return false;
@@ -868,13 +859,13 @@ namespace Engine
 
         // Load material data
         {
-            if (!loadTexture("data/assets/brickwall.jpg", colorTexture))
+            if (!VulkanHelpers::loadTexture("data/assets/brickwall.jpg", colorTexture))
             {
                 printf("Vulkan color texture create failed\n");
                 return false;
             }
 
-            if (!loadTexture("data/assets/brickwall_normal.jpg", normalTexture))
+            if (!VulkanHelpers::loadTexture("data/assets/brickwall_normal.jpg", normalTexture))
             {
                 printf("Vulkan normal texture create failed\n");
                 return false;
@@ -1018,6 +1009,8 @@ namespace Engine
         }
 
         printf("Window resized (%d x %d)\n", width, height);
+
+        vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->directQueueIdle, VK_TRUE, UINT64_MAX);
         if (!pDeviceContext->resizeSwapResources(static_cast<uint32_t>(width), static_cast<uint32_t>(height)))
         {
             printf("VK Renderer swap resource resize failed\n");
