@@ -1734,7 +1734,8 @@ namespace Engine
         int width = 0;
         int height = 0;
         SDL_GetWindowSize(pWindow, &width, &height);
-        if (width == 0 || height == 0) {
+        uint32_t windowFlags = SDL_GetWindowFlags(pWindow);
+        if (width == 0 || height == 0 || (windowFlags & SDL_WINDOW_MINIMIZED) != 0) {
             return;
         }
 
