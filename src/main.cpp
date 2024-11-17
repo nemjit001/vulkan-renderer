@@ -21,10 +21,8 @@
 #include <volk.h>
 
 #include "math.hpp"
+#include "renderer.hpp"
 #include "timer.hpp"
-
-#define SIZEOF_ARRAY(val)   (sizeof((val)) / sizeof((val)[0]))
-#define VK_FAILED(expr)     ((expr) != VK_SUCCESS)
 
 namespace Engine
 {
@@ -38,42 +36,6 @@ namespace Engine
             glm::vec3 normal;
             glm::vec3 tangent;
             glm::vec2 texCoord;
-        };
-
-        /// @brief GPU buffer with associated data.
-        struct Buffer
-        {
-            /// @brief Destroy this buffer.
-            void destroy();
-
-            /// @brief Map buffer memory.
-            void map();
-
-            /// @brief Unmap buffer memory.
-            void unmap();
-
-            VkDevice device;
-            VkBuffer handle;
-            VkDeviceMemory memory;
-            size_t size;
-            bool mapped;
-            void* pData;
-        };
-
-        /// @brief GPU texture with associated data.
-        struct Texture
-        {
-            /// @brief Destroy this texture.
-            void destroy();
-
-            VkDevice device;
-            VkImage handle;
-            VkDeviceMemory memory;
-            VkFormat format;
-            uint32_t width;
-            uint32_t height;
-            uint32_t depthOrLayers;
-            uint32_t levels;
         };
 
         /// @brief Simple TRS transform.
@@ -122,10 +84,10 @@ namespace Engine
         /// @brief Uniform scene data structure, matches data uniform available in shaders.
         struct UniformSceneData
         {
-            alignas(16)  glm::vec3 sunDirection;
-            alignas(16)  glm::vec3 sunColor;
-            alignas(16)  glm::vec3 ambientLight;
-            alignas(16)  glm::vec3 cameraPosition;
+            alignas(16) glm::vec3 sunDirection;
+            alignas(16) glm::vec3 sunColor;
+            alignas(16) glm::vec3 ambientLight;
+            alignas(16) glm::vec3 cameraPosition;
             alignas(16) glm::mat4 viewproject;
             alignas(16) glm::mat4 model;
             alignas(16) glm::mat4 normal;
@@ -139,36 +101,8 @@ namespace Engine
 
     bool isRunning = true;
     SDL_Window* pWindow = nullptr;
-    Timer frameTimer;
-
-    VkInstance instance = VK_NULL_HANDLE;
-    VkDebugUtilsMessengerEXT dbgMessenger = VK_NULL_HANDLE;
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkPhysicalDeviceMemoryProperties deviceMemoryProperties{};
-    uint32_t directQueueFamily = VK_QUEUE_FAMILY_IGNORED;
-
-    VkDevice device = VK_NULL_HANDLE;
-    VkQueue directQueue = VK_NULL_HANDLE;
-
-    VkSwapchainCreateInfoKHR swapchainCreateInfo{};
-    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-    std::vector<VkImage> swapImages{};
-    std::vector<VkImageView> swapImageViews{};
-    Texture depthStencilTexture{};
-    VkImageView depthStencilView = VK_NULL_HANDLE;
-
-    VkSemaphore swapAvailable = VK_NULL_HANDLE;
-    VkSemaphore swapReleased = VK_NULL_HANDLE;
-    VkFence frameReady = VK_NULL_HANDLE;
-
-    VkCommandPool commandPool = VK_NULL_HANDLE;
-    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-
-    VkRenderPass renderPass = VK_NULL_HANDLE;
-
-    std::vector<VkFramebuffer> swapFramebuffers{};
+    Timer frameTimer{};
+    RenderDeviceContext* pDeviceContext = nullptr;
 
     // GUI data
     VkDescriptorPool imguiDescriptorPool = VK_NULL_HANDLE; //< descriptor pool specifically for ImGui usage
@@ -207,86 +141,6 @@ namespace Engine
 
     namespace
     {
-        /// @brief Vulkan debug callback.
-        /// @param severity 
-        /// @param type 
-        /// @param pCallbackData 
-        /// @param pUserData 
-        /// @return VK_FALSE as per Vulkan spec.
-        VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
-            VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-            VkDebugUtilsMessageTypeFlagsEXT type,
-            VkDebugUtilsMessengerCallbackDataEXT const* pCallbackData,
-            void* pUserData
-        )
-        {
-            (void)(severity);
-            (void)(type);
-            (void)(pUserData);
-
-            printf("[Vulkan] %s\n", pCallbackData->pMessage);
-            return VK_FALSE;
-        }
-
-        /// @brief Find a device queue family based on required and exclusion flags.
-        /// @param physicalDevice 
-        /// @param surface Optional surface parameter, if not VK_NULL_HANDLE the returned queue family supports presenting to this surface.
-        /// @param flags Required queue flags.
-        /// @param exclude Queue flags that must not be set.
-        /// @return The found queue family or VK_QUEUE_FAMILY_IGNORED on failure.
-        uint32_t findQueueFamily(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkQueueFlags flags, VkQueueFlags exclude)
-        {
-            uint32_t queueFamilyCount = 0;
-            vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
-            std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-            vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilies.data());
-
-            for (uint32_t i = 0; i < queueFamilyCount; i++)
-            {
-                VkBool32 surfaceSupport = VK_FALSE;
-                if (surface != VK_NULL_HANDLE)
-                {
-                    vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, surface, &surfaceSupport);
-                }
-
-                if ((queueFamilies[i].queueFlags & flags) == flags
-                    && (queueFamilies[i].queueFlags & exclude) == 0)
-                {
-                    if (surface != VK_NULL_HANDLE && !surfaceSupport)
-                    {
-                        continue;
-                    }
-
-                    return i;
-                }
-            }
-
-            printf("Failed to find queue family for combination of surface/flags/exclusions\n");
-            return VK_QUEUE_FAMILY_IGNORED;
-        }
-
-        /// @brief Get the memory type index based on memory requirements and property flags.
-        /// @param deviceMemProperties 
-        /// @param requirements 
-        /// @param propertyFlags 
-        /// @return The memory type index or UINT32_MAX on failure.
-        uint32_t getMemoryTypeIndex(VkPhysicalDeviceMemoryProperties const& deviceMemProperties, VkMemoryRequirements const& requirements, VkMemoryPropertyFlags propertyFlags)
-        {
-            for (uint32_t memIdx = 0; memIdx < deviceMemProperties.memoryTypeCount; memIdx++)
-            {
-                uint32_t const memoryTypeBits = (1 << memIdx);
-
-                if ((requirements.memoryTypeBits & memoryTypeBits) != 0
-                    && (deviceMemProperties.memoryTypes[memIdx].propertyFlags & propertyFlags) == propertyFlags)
-                {
-                    return memIdx;
-                }
-            }
-
-            printf("Failed to find memory type index for memory requirements and propry flags combination\n");
-            return ~0U;
-        }
-
         /// @brief Read a binary shader file.
         /// @param path Path to the shader file.
         /// @param shaderCode Shader code vector.
@@ -313,133 +167,6 @@ namespace Engine
             return true;
         }
 
-        /// @brief Create a GPU buffer.
-        /// @param buffer Buffer to initialize.
-        /// @param device 
-        /// @param size Buffer size, must be greater than 0.
-        /// @param usage 
-        /// @param memoryProperties 
-        /// @param createMapped Set to true if the buffer must be mapped on creation.
-        /// @return A boolean indicating success.
-        bool createBuffer(Buffer& buffer, VkDevice device, size_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties, bool createMapped = false)
-        {
-            assert(size > 0);
-
-            buffer.device = device;
-            buffer.size = size;
-            buffer.mapped = false;
-            buffer.pData = nullptr;
-
-            VkBufferCreateInfo bufferCreateInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-            bufferCreateInfo.flags = 0;
-            bufferCreateInfo.usage = usage;
-            bufferCreateInfo.size = size;
-            bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-            if (VK_FAILED(vkCreateBuffer(device, &bufferCreateInfo, nullptr, &buffer.handle)))
-            {
-                return false;
-            }
-
-            VkMemoryRequirements memRequirements{};
-            vkGetBufferMemoryRequirements(device, buffer.handle, &memRequirements);
-
-            VkMemoryAllocateInfo allocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-            allocateInfo.allocationSize = memRequirements.size;
-            allocateInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, memRequirements, memoryProperties);
-
-            if (VK_FAILED(vkAllocateMemory(device, &allocateInfo, nullptr, &buffer.memory)))
-            {
-                return false;
-            }
-            vkBindBufferMemory(device, buffer.handle, buffer.memory, 0);
-
-            if (createMapped) {
-                buffer.map();
-            }
-
-            return true;
-        }
-
-        /// @brief Create a GPU texture.
-        /// @param texture Texture to initialize.
-        /// @param device 
-        /// @param imageType 
-        /// @param format 
-        /// @param usage 
-        /// @param memoryProperties 
-        /// @param width Texture width, must be greater than 0.
-        /// @param height Texture height, must be greater than 0.
-        /// @param depth Texture depth, must be greater than 0.
-        /// @param levels Texture mip levels, must be greater than 0.
-        /// @param layers Texture layers, if depth > 1 this must be 1.
-        /// @param samples 
-        /// @param tiling 
-        /// @param initialLayout 
-        /// @return A boolean indicating success.
-        bool createTexture(
-            Texture& texture,
-            VkDevice device,
-            VkImageType imageType,
-            VkFormat format,
-            VkImageUsageFlags usage,
-            VkMemoryPropertyFlags memoryProperties,
-            uint32_t width,
-            uint32_t height,
-            uint32_t depth,
-            uint32_t levels = 1,
-            uint32_t layers = 1,
-            VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
-            VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL,
-            VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-        )
-        {
-            assert(width > 0 && height > 0 && depth > 0);
-            assert(levels > 0);
-            assert(layers > 0);
-            assert(depth == 1 || layers == 1); //< layers and depth may not both be >1.
-
-            texture.device = device;
-            texture.format = format;
-            texture.width = width;
-            texture.height = height;
-            texture.depthOrLayers = depth == 1 ? layers : depth;
-            texture.levels = levels;
-
-            VkImageCreateInfo imageCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-            imageCreateInfo.flags = 0;
-            imageCreateInfo.imageType = imageType;
-            imageCreateInfo.format = format;
-            imageCreateInfo.extent = VkExtent3D{ width, height, depth };
-            imageCreateInfo.mipLevels = levels;
-            imageCreateInfo.arrayLayers = layers;
-            imageCreateInfo.samples = samples;
-            imageCreateInfo.tiling = tiling;
-            imageCreateInfo.usage = usage;
-            imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            imageCreateInfo.initialLayout = initialLayout;
-
-            if (VK_FAILED(vkCreateImage(device, &imageCreateInfo, nullptr, &texture.handle)))
-            {
-                return false;
-            }
-
-            VkMemoryRequirements memRequirements{};
-            vkGetImageMemoryRequirements(device, texture.handle, &memRequirements);
-
-            VkMemoryAllocateInfo allocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-            allocateInfo.allocationSize = memRequirements.size;
-            allocateInfo.memoryTypeIndex = getMemoryTypeIndex(deviceMemoryProperties, memRequirements, memoryProperties);
-
-            if (VK_FAILED(vkAllocateMemory(device, &allocateInfo, nullptr, &texture.memory)))
-            {
-                return false;
-            }
-            vkBindImageMemory(device, texture.handle, texture.memory, 0);
-
-            return true;
-        }
-
         /// @brief Create a mesh object.
         /// @param mesh Mesh to initialize.
         /// @param vertices 
@@ -460,11 +187,11 @@ namespace Engine
             mesh.vertexCount = vertexCount;
             mesh.indexCount = indexCount;
 
-            if (!createBuffer(mesh.vertexBuffer, device, vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+            if (!pDeviceContext->createBuffer(mesh.vertexBuffer, vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
                 return false;
             }
 
-            if (!createBuffer(mesh.indexBuffer, device, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+            if (!pDeviceContext->createBuffer(mesh.indexBuffer, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
                 return false;
             }
 
@@ -566,7 +293,7 @@ namespace Engine
             printf("Loaded texture [%s] (%d x %d x %d)\n", path, width, height, channels);
 
             Buffer uploadBuffer{};
-            if (!createBuffer(uploadBuffer, device, width * height * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true)) {
+            if (!pDeviceContext->createBuffer(uploadBuffer, width * height * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true)) {
                 stbi_image_free(pImageData);
                 return false;
             }
@@ -574,9 +301,8 @@ namespace Engine
             assert(uploadBuffer.mapped && uploadBuffer.pData != nullptr);
             memcpy(uploadBuffer.pData, pImageData, uploadBuffer.size);
 
-            if (!createTexture(
+            if (!pDeviceContext->createTexture(
                 texture,
-                device,
                 VK_IMAGE_TYPE_2D,
                 VK_FORMAT_R8G8B8A8_UNORM,
                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
@@ -592,23 +318,23 @@ namespace Engine
             {
                 VkFenceCreateInfo fenceCreateInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
                 VkFence uploadFence = VK_NULL_HANDLE;
-                if (VK_FAILED(vkCreateFence(device, &fenceCreateInfo, nullptr, &uploadFence)))
+                if (VK_FAILED(vkCreateFence(pDeviceContext->device, &fenceCreateInfo, nullptr, &uploadFence)))
                 {
-                    vkDestroyFence(device, uploadFence, nullptr);
+                    vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
                 }
 
                 VkCommandBufferAllocateInfo uploadBufAllocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-                uploadBufAllocInfo.commandPool = commandPool;
+                uploadBufAllocInfo.commandPool = pDeviceContext->commandPool;
                 uploadBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
                 uploadBufAllocInfo.commandBufferCount = 1;
 
                 VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
-                if (VK_FAILED(vkAllocateCommandBuffers(device, &uploadBufAllocInfo, &uploadCommandBuffer)))
+                if (VK_FAILED(vkAllocateCommandBuffers(pDeviceContext->device, &uploadBufAllocInfo, &uploadCommandBuffer)))
                 {
-                    vkDestroyFence(device, uploadFence, nullptr);
+                    vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -620,8 +346,8 @@ namespace Engine
 
                 if (VK_FAILED(vkBeginCommandBuffer(uploadCommandBuffer, &uploadBeginInfo)))
                 {
-                    vkDestroyFence(device, uploadFence, nullptr);
-                    vkFreeCommandBuffers(device, commandPool, 1, &uploadCommandBuffer);
+                    vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
+                    vkFreeCommandBuffers(pDeviceContext->device, pDeviceContext->commandPool, 1, &uploadCommandBuffer);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -694,8 +420,8 @@ namespace Engine
 
                 if (VK_FAILED(vkEndCommandBuffer(uploadCommandBuffer)))
                 {
-                    vkDestroyFence(device, uploadFence, nullptr);
-                    vkFreeCommandBuffers(device, commandPool, 1, &uploadCommandBuffer);
+                    vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
+                    vkFreeCommandBuffers(pDeviceContext->device, pDeviceContext->commandPool, 1, &uploadCommandBuffer);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -710,54 +436,23 @@ namespace Engine
                 uploadSubmit.signalSemaphoreCount = 0;
                 uploadSubmit.pSignalSemaphores = nullptr;
 
-                if (VK_FAILED(vkQueueSubmit(directQueue, 1, &uploadSubmit, uploadFence)))
+                if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &uploadSubmit, uploadFence)))
                 {
-                    vkDestroyFence(device, uploadFence, nullptr);
-                    vkFreeCommandBuffers(device, commandPool, 1, &uploadCommandBuffer);
+                    vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
+                    vkFreeCommandBuffers(pDeviceContext->device, pDeviceContext->commandPool, 1, &uploadCommandBuffer);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
                 }
 
-                vkWaitForFences(device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
-                vkDestroyFence(device, uploadFence, nullptr);
-                vkFreeCommandBuffers(device, commandPool, 1, &uploadCommandBuffer);
+                vkWaitForFences(pDeviceContext->device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
+                vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
+                vkFreeCommandBuffers(pDeviceContext->device, pDeviceContext->commandPool, 1, &uploadCommandBuffer);
             }
 
             uploadBuffer.destroy();
             stbi_image_free(pImageData);
             return true;
-        }
-
-        void Buffer::destroy()
-        {
-            if (mapped) {
-                unmap();
-            }
-
-            vkFreeMemory(device, memory, nullptr);
-            vkDestroyBuffer(device, handle, nullptr);
-        }
-
-        void Buffer::map()
-        {
-            pData = nullptr;
-            vkMapMemory(device, memory, 0, size, 0, &pData);
-            assert(pData != nullptr);
-
-            mapped = true;
-        }
-
-        void Buffer::unmap()
-        {
-            vkUnmapMemory(device, memory);
-            mapped = false;
-        }
-
-        void Texture::destroy()
-        {
-            vkFreeMemory(device, memory, nullptr);
-            vkDestroyImage(device, handle, nullptr);
         }
 
         glm::mat4 Transform::matrix() const
@@ -806,410 +501,12 @@ namespace Engine
             return false;
         }
 
-        if (VK_FAILED(volkInitialize()))
+        if (!Renderer::init(pWindow))
         {
-            printf("Volk init failed\n");
+            printf("VK Renderer renderer init failed\n");
             return false;
         }
-
-        // Create Vulkan instance
-        {
-            std::vector<char const*> layers;
-            std::vector<char const*> extensions;
-
-            uint32_t windowExtCount = 0;
-            SDL_Vulkan_GetInstanceExtensions(nullptr /* unused */, &windowExtCount, nullptr);
-            extensions.resize(windowExtCount);
-            SDL_Vulkan_GetInstanceExtensions(nullptr /* unused */, &windowExtCount, extensions.data());
-
-#ifndef NDEBUG
-            layers.push_back("VK_LAYER_KHRONOS_validation");
-            layers.push_back("VK_LAYER_KHRONOS_synchronization2");
-
-            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-#endif
-
-            VkApplicationInfo appInfo{ VK_STRUCTURE_TYPE_APPLICATION_INFO };
-            appInfo.applicationVersion = 0;
-            appInfo.pApplicationName = "VK Renderer";
-            appInfo.engineVersion = 0;
-            appInfo.pEngineName = "VK Renderer";
-            appInfo.apiVersion = VK_API_VERSION_1_3;
-
-            VkInstanceCreateInfo instanceCreateInfo{ VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
-            instanceCreateInfo.flags = 0;
-            instanceCreateInfo.pApplicationInfo = &appInfo;
-            instanceCreateInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
-            instanceCreateInfo.ppEnabledLayerNames = layers.data();
-            instanceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
-            instanceCreateInfo.ppEnabledExtensionNames = extensions.data();
-
-#ifndef NDEBUG
-            VkDebugUtilsMessengerCreateInfoEXT dbgMessengerCreateInfo{ VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };
-            dbgMessengerCreateInfo.flags = 0;
-            dbgMessengerCreateInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
-                | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
-                | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
-                | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-            dbgMessengerCreateInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
-                | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
-                | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT
-                | VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT;
-            dbgMessengerCreateInfo.pfnUserCallback = debugCallback;
-            dbgMessengerCreateInfo.pUserData = nullptr;
-            instanceCreateInfo.pNext = &dbgMessengerCreateInfo;
-#endif
-
-            if (VK_FAILED(vkCreateInstance(&instanceCreateInfo, nullptr, &instance)))
-            {
-                printf("Vulkan instance create failed\n");
-                return false;
-            }
-            volkLoadInstanceOnly(instance);
-
-#ifndef NDEBUG
-            if (VK_FAILED(vkCreateDebugUtilsMessengerEXT(instance, &dbgMessengerCreateInfo, nullptr, &dbgMessenger)))
-            {
-                printf("Vulkan debug messenger create failed\n");
-                return false;
-            }
-#endif
-        }
-
-        // Create render surface
-        {
-            if (!SDL_Vulkan_CreateSurface(pWindow, instance, &surface))
-            {
-                printf("Vulkan surface create failed\n");
-                return false;
-            }
-        }
-
-        // Find a physical device
-        {
-            uint32_t deviceCount = 0;
-            vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-            std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
-            vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices.data());
-
-            physicalDevice = VK_NULL_HANDLE;
-            for (auto& device : physicalDevices)
-            {
-                VkPhysicalDeviceFeatures2 deviceFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-                deviceFeatures.pNext = nullptr;
-                vkGetPhysicalDeviceFeatures2(device, &deviceFeatures);
-
-                VkPhysicalDeviceProperties2 deviceProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
-                deviceProperties.pNext = nullptr;
-                vkGetPhysicalDeviceProperties2(device, &deviceProperties);
-
-                if (deviceFeatures.features.samplerAnisotropy == VK_TRUE
-                    && deviceFeatures.features.depthBounds == VK_TRUE)
-                {
-                    physicalDevice = device;
-                    printf("Automatically selected render device: %s\n", deviceProperties.properties.deviceName);
-                    break;
-                }
-            }
-
-            if (physicalDevice == VK_NULL_HANDLE)
-            {
-                printf("Vulkan no supported physical device available\n");
-                return false;
-            }
-
-            vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemoryProperties);
-            directQueueFamily = findQueueFamily(physicalDevice, surface, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT | VK_QUEUE_COMPUTE_BIT, 0);
-
-            if (directQueueFamily == VK_QUEUE_FAMILY_IGNORED)
-            {
-                printf("Vulkan direct queue unavailable\n");
-                return false;
-            }
-        }
-
-        // Create logical device
-        {
-            std::vector<char const*> extensions;
-            extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-
-            float priorities[] = { 1.0F };
-            VkDeviceQueueCreateInfo directQueueCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
-            directQueueCreateInfo.flags = 0;
-            directQueueCreateInfo.queueFamilyIndex = directQueueFamily;
-            directQueueCreateInfo.queueCount = SIZEOF_ARRAY(priorities);
-            directQueueCreateInfo.pQueuePriorities = priorities;
-
-            VkPhysicalDeviceFeatures2 enabledFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-            enabledFeatures.features.samplerAnisotropy = VK_TRUE;
-            enabledFeatures.features.depthBounds = VK_TRUE;
-
-            VkDeviceCreateInfo deviceCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
-            deviceCreateInfo.flags = 0;
-            deviceCreateInfo.queueCreateInfoCount = 1;
-            deviceCreateInfo.pQueueCreateInfos = &directQueueCreateInfo;
-            deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
-            deviceCreateInfo.ppEnabledExtensionNames = extensions.data();
-            deviceCreateInfo.pEnabledFeatures = nullptr;
-            deviceCreateInfo.pNext = &enabledFeatures;
-
-            if (VK_FAILED(vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device)))
-            {
-                printf("Vulkan device create failed\n");
-                return false;
-            }
-            volkLoadDevice(device);
-            vkGetDeviceQueue(device, directQueueFamily, 0, &directQueue);
-            assert(directQueue != VK_NULL_HANDLE);
-        }
-
-        // Create swap chain & swap resources
-        {
-            // Query surface capabilities, formats, present modes, etc.
-            VkSurfaceCapabilitiesKHR surfaceCaps{};
-            vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCaps);
-
-            uint32_t surfaceFormatCount = 0;
-            vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, nullptr);
-            std::vector<VkSurfaceFormatKHR> surfaceFormats(surfaceFormatCount);
-            vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, surfaceFormats.data());
-
-            VkFormat preferredFormat = surfaceFormats[0].format;
-            for (auto const& format : surfaceFormats)
-            {
-                // Pick first available SRGB format for swap
-                if (format.format == VK_FORMAT_B8G8R8A8_SRGB
-                    || format.format == VK_FORMAT_R8G8B8A8_SRGB)
-                {
-                    preferredFormat = format.format;
-                }
-            }
-
-            // Create swap chain
-            swapchainCreateInfo = VkSwapchainCreateInfoKHR{ VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
-            swapchainCreateInfo.flags = 0;
-            swapchainCreateInfo.surface = surface;
-            swapchainCreateInfo.minImageCount = (surfaceCaps.maxImageCount == 0 || surfaceCaps.minImageCount + 1 < surfaceCaps.maxImageCount) ?
-                surfaceCaps.minImageCount + 1 : surfaceCaps.maxImageCount;
-            swapchainCreateInfo.imageFormat = preferredFormat;
-            swapchainCreateInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-            swapchainCreateInfo.imageExtent = (surfaceCaps.currentExtent.width == UINT32_MAX || surfaceCaps.currentExtent.height == UINT32_MAX) ?
-                VkExtent2D{ DefaultWindowWidth, DefaultWindowHeight } : surfaceCaps.currentExtent;
-            swapchainCreateInfo.imageArrayLayers = 1;
-            swapchainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-            swapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            swapchainCreateInfo.preTransform = surfaceCaps.currentTransform;
-            swapchainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-            swapchainCreateInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
-            swapchainCreateInfo.clipped = VK_FALSE;
-            swapchainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
-
-            if (VK_FAILED(vkCreateSwapchainKHR(device, &swapchainCreateInfo, nullptr, &swapchain)))
-            {
-                printf("Vulkan swap chain create failed\n");
-                return false;
-            }
-
-            // Fetch swap images & create swap views
-            uint32_t swapImageCount = 0;
-            vkGetSwapchainImagesKHR(device, swapchain, &swapImageCount, nullptr);
-            swapImages.resize(swapImageCount);
-            vkGetSwapchainImagesKHR(device, swapchain, &swapImageCount, swapImages.data());
-
-            swapImageViews.reserve(swapImages.size());
-            for (auto& image : swapImages)
-            {
-                VkImageViewCreateInfo swapViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-                swapViewCreateInfo.flags = 0;
-                swapViewCreateInfo.image = image;
-                swapViewCreateInfo.format = swapchainCreateInfo.imageFormat;
-                swapViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-                swapViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-                swapViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-                swapViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-                swapViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-                swapViewCreateInfo.subresourceRange.baseMipLevel = 0;
-                swapViewCreateInfo.subresourceRange.levelCount = 1;
-                swapViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-                swapViewCreateInfo.subresourceRange.layerCount = 1;
-                swapViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-                VkImageView view = VK_NULL_HANDLE;
-                vkCreateImageView(device, &swapViewCreateInfo, nullptr, &view);
-                assert(view != VK_NULL_HANDLE);
-                swapImageViews.push_back(view);
-            }
-
-            // Create depth stencil target
-            if (!createTexture(
-                depthStencilTexture,
-                device,
-                VK_IMAGE_TYPE_2D,
-                VK_FORMAT_D32_SFLOAT,
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1
-            ))
-            {
-                printf("Vulkan depth stencil texture create failed\n");
-                return false;
-            }
-
-            VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-            depthStencilViewCreateInfo.flags = 0;
-            depthStencilViewCreateInfo.image = depthStencilTexture.handle;
-            depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            depthStencilViewCreateInfo.format = depthStencilTexture.format;
-            depthStencilViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.subresourceRange.baseMipLevel = 0;
-            depthStencilViewCreateInfo.subresourceRange.levelCount = depthStencilTexture.levels;
-            depthStencilViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-            depthStencilViewCreateInfo.subresourceRange.layerCount = depthStencilTexture.depthOrLayers;
-            depthStencilViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-
-            if (VK_FAILED(vkCreateImageView(device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
-            {
-                printf("Vulkan depth stencil view create failed\n");
-                return false;
-            }
-        }
-
-        // Create synchronization primitives
-        {
-            VkSemaphoreCreateInfo semaphoreCreateInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-            semaphoreCreateInfo.flags = 0;
-
-            VkFenceCreateInfo fenceCreateInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-            fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-            if (VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapAvailable))
-                || VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapReleased))
-                || VK_FAILED(vkCreateFence(device, &fenceCreateInfo, nullptr, &frameReady)))
-            {
-                printf("Vulkan sync primitive create failed\n");
-                return false;
-            }
-        }
-
-        // Create command pool & command buffer
-        {
-            VkCommandPoolCreateInfo commandPoolCreateInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
-            commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-            commandPoolCreateInfo.queueFamilyIndex = directQueueFamily;
-
-            if (VK_FAILED(vkCreateCommandPool(device, &commandPoolCreateInfo, nullptr, &commandPool)))
-            {
-                printf("Vulkan command pool create failed\n");
-                return false;
-            }
-
-            VkCommandBufferAllocateInfo commandBufAllocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-            commandBufAllocInfo.commandPool = commandPool;
-            commandBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            commandBufAllocInfo.commandBufferCount = 1;
-
-            if (VK_FAILED(vkAllocateCommandBuffers(device, &commandBufAllocInfo, &commandBuffer)))
-            {
-                printf("Vulkan command buffer allocation failed\n");
-                return false;
-            }
-        }
-
-        // Create main render pass
-        {
-            VkAttachmentDescription colorAttachment{};
-            colorAttachment.flags = 0;
-            colorAttachment.format = swapchainCreateInfo.imageFormat;
-            colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-            colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-            colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-            colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-            colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-            VkAttachmentDescription depthStencilAttachment{};
-            depthStencilAttachment.flags = 0;
-            depthStencilAttachment.format = VK_FORMAT_D32_SFLOAT;
-            depthStencilAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-            depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-            depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            depthStencilAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-            depthStencilAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-            depthStencilAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            depthStencilAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-            VkAttachmentReference colorAttachmentRefs[] = {
-                VkAttachmentReference{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
-            };
-
-            VkAttachmentReference depthStencilAttachmentRef{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
-
-            VkSubpassDescription forwardPass{};
-            forwardPass.flags = 0;
-            forwardPass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-            forwardPass.inputAttachmentCount = 0;
-            forwardPass.pInputAttachments = nullptr;
-            forwardPass.colorAttachmentCount = SIZEOF_ARRAY(colorAttachmentRefs);
-            forwardPass.pColorAttachments = colorAttachmentRefs;
-            forwardPass.pResolveAttachments = nullptr;
-            forwardPass.pDepthStencilAttachment = &depthStencilAttachmentRef;
-            forwardPass.preserveAttachmentCount = 0;
-            forwardPass.pPreserveAttachments = nullptr;
-
-            VkSubpassDependency previousFrameDependency{};
-            previousFrameDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-            previousFrameDependency.dstSubpass = 0;
-            previousFrameDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-            previousFrameDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            previousFrameDependency.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-            previousFrameDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
-
-            VkAttachmentDescription attachments[] = { colorAttachment, depthStencilAttachment, };
-            VkSubpassDescription subpasses[] = { forwardPass, };
-            VkSubpassDependency dependencies[] = { previousFrameDependency, };
-            VkRenderPassCreateInfo renderPassCreateInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
-            renderPassCreateInfo.flags = 0;
-            renderPassCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
-            renderPassCreateInfo.pAttachments = attachments;
-            renderPassCreateInfo.subpassCount = SIZEOF_ARRAY(subpasses);
-            renderPassCreateInfo.pSubpasses = subpasses;
-            renderPassCreateInfo.dependencyCount = SIZEOF_ARRAY(dependencies);
-            renderPassCreateInfo.pDependencies = dependencies;
-
-            if (VK_FAILED(vkCreateRenderPass(device, &renderPassCreateInfo, nullptr, &renderPass)))
-            {
-                printf("Vulkan render pass create failed\n");
-                return false;
-            }
-        }
-
-        // Create swap framebuffers
-        {
-            swapFramebuffers.reserve(swapImageViews.size());
-            for (auto& swapView : swapImageViews)
-            {
-                VkExtent2D const swapExtent = swapchainCreateInfo.imageExtent;
-                VkImageView attachments[] = { swapView, depthStencilView, };
-
-                VkFramebufferCreateInfo framebufferCreateInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
-                framebufferCreateInfo.flags = 0;
-                framebufferCreateInfo.renderPass = renderPass;
-                framebufferCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
-                framebufferCreateInfo.pAttachments = attachments;
-                framebufferCreateInfo.width = swapExtent.width;
-                framebufferCreateInfo.height = swapExtent.height;
-                framebufferCreateInfo.layers = 1;
-
-                VkFramebuffer framebuffer = VK_NULL_HANDLE;
-                vkCreateFramebuffer(device, &framebufferCreateInfo, nullptr, &framebuffer);
-                assert(framebuffer != VK_NULL_HANDLE);
-                swapFramebuffers.push_back(framebuffer);
-            }
-        }
+        pDeviceContext = Renderer::pickRenderDevice();
 
         // Init ImGui for Vulkan
         {
@@ -1223,29 +520,29 @@ namespace Engine
             imguiPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
             imguiPoolCreateInfo.pPoolSizes = poolSizes;
 
-            if (VK_FAILED(vkCreateDescriptorPool(device, &imguiPoolCreateInfo, nullptr, &imguiDescriptorPool)))
+            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &imguiPoolCreateInfo, nullptr, &imguiDescriptorPool)))
             {
                 printf("Vulkan imgui descriptor pool create failed\n");
                 return false;
             }
 
             ImGui_ImplVulkan_InitInfo initInfo{};
-            initInfo.Instance = instance;
-            initInfo.PhysicalDevice = physicalDevice;
-            initInfo.Device = device;
-            initInfo.QueueFamily = directQueueFamily;
-            initInfo.Queue = directQueue;
+            initInfo.Instance = Renderer::getInstance();
+            initInfo.PhysicalDevice = pDeviceContext->physicalDevice;
+            initInfo.Device = pDeviceContext->device;
+            initInfo.QueueFamily = pDeviceContext->directQueueFamily;
+            initInfo.Queue = pDeviceContext->directQueue;
             initInfo.DescriptorPool = imguiDescriptorPool;
-            initInfo.RenderPass = renderPass;
-            initInfo.MinImageCount = swapchainCreateInfo.minImageCount;
-            initInfo.ImageCount = swapchainCreateInfo.minImageCount;
+            initInfo.RenderPass = pDeviceContext->renderPass;
+            initInfo.MinImageCount = pDeviceContext->swapchainCreateInfo.minImageCount;
+            initInfo.ImageCount = pDeviceContext->swapchainCreateInfo.minImageCount;
             initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
             initInfo.PipelineCache = VK_NULL_HANDLE;
             initInfo.Subpass = 0;
             initInfo.UseDynamicRendering = false;
             initInfo.Allocator = nullptr;
 
-            auto imguiLoadFunc = [](char const* pName, void* pUserData) { (void)(pUserData); return vkGetInstanceProcAddr(instance, pName); };
+            auto imguiLoadFunc = [](char const* pName, void* pUserData) { (void)(pUserData); return vkGetInstanceProcAddr(Renderer::getInstance(), pName); };
             if (!ImGui_ImplVulkan_LoadFunctions(imguiLoadFunc, nullptr)
                 || !ImGui_ImplVulkan_Init(&initInfo))
             {
@@ -1274,7 +571,7 @@ namespace Engine
             samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
             samplerCreateInfo.unnormalizedCoordinates = VK_FALSE;
 
-            if (VK_FAILED(vkCreateSampler(device, &samplerCreateInfo, nullptr, &textureSampler)))
+            if (VK_FAILED(vkCreateSampler(pDeviceContext->device, &samplerCreateInfo, nullptr, &textureSampler)))
             {
                 printf("Vulkan texture sampler create failed\n");
                 return false;
@@ -1307,7 +604,7 @@ namespace Engine
             descriptorSetLayoutCreateInfo.bindingCount = SIZEOF_ARRAY(descriptorSetLayoutBindings);
             descriptorSetLayoutCreateInfo.pBindings = descriptorSetLayoutBindings;
 
-            if (VK_FAILED(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout)))
+            if (VK_FAILED(vkCreateDescriptorSetLayout(pDeviceContext->device, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout)))
             {
                 printf("Vulkan descriptor set layout create failed\n");
                 return false;
@@ -1321,7 +618,7 @@ namespace Engine
             pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
             pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
-            if (VK_FAILED(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout)))
+            if (VK_FAILED(vkCreatePipelineLayout(pDeviceContext->device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout)))
             {
                 printf("Vulkan pipeline layout create failed\n");
                 return false;
@@ -1340,7 +637,7 @@ namespace Engine
             vertexShaderCreateInfo.pCode = vertexShaderCode.data();
 
             VkShaderModule vertexShader = VK_NULL_HANDLE;
-            if (VK_FAILED(vkCreateShaderModule(device, &vertexShaderCreateInfo, nullptr, &vertexShader)))
+            if (VK_FAILED(vkCreateShaderModule(pDeviceContext->device, &vertexShaderCreateInfo, nullptr, &vertexShader)))
             {
                 printf("Vulkan vertex shader create failed\n");
                 return false;
@@ -1359,7 +656,7 @@ namespace Engine
             fragmentShaderCreateInfo.pCode = fragmentShaderCode.data();
 
             VkShaderModule fragmentShader = VK_NULL_HANDLE;
-            if (VK_FAILED(vkCreateShaderModule(device, &fragmentShaderCreateInfo, nullptr, &fragmentShader)))
+            if (VK_FAILED(vkCreateShaderModule(pDeviceContext->device, &fragmentShaderCreateInfo, nullptr, &fragmentShader)))
             {
                 printf("Vulkan vertex shader create failed\n");
                 return false;
@@ -1403,10 +700,10 @@ namespace Engine
             inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             inputAssemblyState.primitiveRestartEnable = VK_FALSE;
 
-            float viewportWidth = static_cast<float>(swapchainCreateInfo.imageExtent.width);
-            float viewportHeight = static_cast<float>(swapchainCreateInfo.imageExtent.height);
+            float viewportWidth = static_cast<float>(pDeviceContext->swapchainCreateInfo.imageExtent.width);
+            float viewportHeight = static_cast<float>(pDeviceContext->swapchainCreateInfo.imageExtent.height);
             viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -1.0F * viewportHeight, 0.0F, 1.0F }; // viewport height hack is needed because of OpenGL / Vulkan viewport differences
-            scissor = VkRect2D{ VkOffset2D{ 0, 0 }, swapchainCreateInfo.imageExtent };
+            scissor = VkRect2D{ VkOffset2D{ 0, 0 }, pDeviceContext->swapchainCreateInfo.imageExtent };
 
             VkPipelineViewportStateCreateInfo viewportState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
             viewportState.flags = 0;
@@ -1503,24 +800,24 @@ namespace Engine
             graphicsPipelineCreateInfo.pColorBlendState = &colorBlendState;
             graphicsPipelineCreateInfo.pDynamicState = &dynamicState;
             graphicsPipelineCreateInfo.layout = pipelineLayout;
-            graphicsPipelineCreateInfo.renderPass = renderPass;
+            graphicsPipelineCreateInfo.renderPass = pDeviceContext->renderPass;
             graphicsPipelineCreateInfo.subpass = 0;
             graphicsPipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
             graphicsPipelineCreateInfo.basePipelineIndex = 0;
 
-            if (VK_FAILED(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, nullptr, &graphicsPipeline)))
+            if (VK_FAILED(vkCreateGraphicsPipelines(pDeviceContext->device, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, nullptr, &graphicsPipeline)))
             {
                 printf("Vulkan graphics pipeline create failed\n");
                 return false;
             }
 
-            vkDestroyShaderModule(device, fragmentShader, nullptr);
-            vkDestroyShaderModule(device, vertexShader, nullptr);
+            vkDestroyShaderModule(pDeviceContext->device, fragmentShader, nullptr);
+            vkDestroyShaderModule(pDeviceContext->device, vertexShader, nullptr);
         }
 
         // Create uniform buffer with descriptor pool & descriptor sets
         {
-            if (!createBuffer(sceneDataBuffer, device, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
+            if (!pDeviceContext->createBuffer(sceneDataBuffer, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
             {
                 printf("Vulkan scene data buffer create failed\n");
                 return false;
@@ -1537,7 +834,7 @@ namespace Engine
             descriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
             descriptorPoolCreateInfo.pPoolSizes = poolSizes;
 
-            if (VK_FAILED(vkCreateDescriptorPool(device, &descriptorPoolCreateInfo, nullptr, &descriptorPool)))
+            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &descriptorPoolCreateInfo, nullptr, &descriptorPool)))
             {
                 printf("Vulkan descriptor pool create failed\n");
                 return false;
@@ -1548,7 +845,7 @@ namespace Engine
             descriptorSetAllocInfo.descriptorSetCount = 1;
             descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayout;
 
-            if (VK_FAILED(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &descriptorSet)))
+            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &descriptorSetAllocInfo, &descriptorSet)))
             {
                 printf("Vulkan descriptor set allocation failed\n");
                 return false;
@@ -1598,7 +895,7 @@ namespace Engine
             colorTextureViewCreateInfo.subresourceRange.layerCount = colorTexture.depthOrLayers;
             colorTextureViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
-            if (VK_FAILED(vkCreateImageView(device, &colorTextureViewCreateInfo, nullptr, &colorTextureView)))
+            if (VK_FAILED(vkCreateImageView(pDeviceContext->device, &colorTextureViewCreateInfo, nullptr, &colorTextureView)))
             {
                 printf("Vulkan color texture view create failed\n");
                 return false;
@@ -1619,7 +916,7 @@ namespace Engine
             normalTextureViewCreateInfo.subresourceRange.layerCount = normalTexture.depthOrLayers;
             normalTextureViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
-            if (VK_FAILED(vkCreateImageView(device, &normalTextureViewCreateInfo, nullptr, &normalTextureView)))
+            if (VK_FAILED(vkCreateImageView(pDeviceContext->device, &normalTextureViewCreateInfo, nullptr, &normalTextureView)))
             {
                 printf("Vulkan color texture view create failed\n");
                 return false;
@@ -1668,7 +965,7 @@ namespace Engine
             normalTextureWrite.pImageInfo = &normalTextureInfo;
 
             VkWriteDescriptorSet descriptorWrites[] = { sceneDataWrite, colorTextureWrite, normalTextureWrite, };
-            vkUpdateDescriptorSets(device, SIZEOF_ARRAY(descriptorWrites), descriptorWrites, 0, nullptr);
+            vkUpdateDescriptorSets(pDeviceContext->device, SIZEOF_ARRAY(descriptorWrites), descriptorWrites, 0, nullptr);
         }
 
         printf("Initialized Vulkan Renderer\n");
@@ -1679,54 +976,29 @@ namespace Engine
     {
         printf("Shutting down Vulkan Renderer\n");
 
-        vkWaitForFences(device, 1, &frameReady, VK_TRUE, UINT64_MAX);
+        vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->frameReady, VK_TRUE, UINT64_MAX);
 
-        vkDestroyImageView(device, normalTextureView, nullptr);
+        vkDestroyImageView(pDeviceContext->device, normalTextureView, nullptr);
         normalTexture.destroy();
-        vkDestroyImageView(device, colorTextureView, nullptr);
+        vkDestroyImageView(pDeviceContext->device, colorTextureView, nullptr);
         colorTexture.destroy();
 
         mesh.destroy();
 
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+        vkDestroyDescriptorPool(pDeviceContext->device, descriptorPool, nullptr);
         sceneDataBuffer.unmap();
         sceneDataBuffer.destroy();
 
-        vkDestroyPipeline(device, graphicsPipeline, nullptr);
-        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        vkDestroySampler(device, textureSampler, nullptr);
+        vkDestroyPipeline(pDeviceContext->device, graphicsPipeline, nullptr);
+        vkDestroyPipelineLayout(pDeviceContext->device, pipelineLayout, nullptr);
+        vkDestroyDescriptorSetLayout(pDeviceContext->device, descriptorSetLayout, nullptr);
+        vkDestroySampler(pDeviceContext->device, textureSampler, nullptr);
 
         ImGui_ImplVulkan_Shutdown();
-        vkDestroyDescriptorPool(device, imguiDescriptorPool, nullptr);
+        vkDestroyDescriptorPool(pDeviceContext->device, imguiDescriptorPool, nullptr);
 
-        for (auto& framebuffer : swapFramebuffers) {
-            vkDestroyFramebuffer(device, framebuffer, nullptr);
-        }
-        vkDestroyRenderPass(device, renderPass, nullptr);
-
-        vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-        vkDestroyCommandPool(device, commandPool, nullptr);
-
-        vkDestroyFence(device, frameReady, nullptr);
-        vkDestroySemaphore(device, swapReleased, nullptr);
-        vkDestroySemaphore(device, swapAvailable, nullptr);
-
-        vkDestroyImageView(device, depthStencilView, nullptr);
-        depthStencilTexture.destroy();
-        for (auto& view : swapImageViews) {
-            vkDestroyImageView(device, view, nullptr);
-        }
-        vkDestroySwapchainKHR(device, swapchain, nullptr);
-
-        vkDestroyDevice(device, nullptr);
-
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-#ifndef NDEBUG
-        vkDestroyDebugUtilsMessengerEXT(instance, dbgMessenger, nullptr);
-#endif
-        vkDestroyInstance(instance, nullptr);
-        volkFinalize();
+        delete pDeviceContext;
+        Renderer::shutdown();
 
         ImGui_ImplSDL2_Shutdown();
         SDL_DestroyWindow(pWindow);
@@ -1746,145 +1018,17 @@ namespace Engine
         }
 
         printf("Window resized (%d x %d)\n", width, height);
-
-        // Wait for previous frame
-        vkWaitForFences(device, 1, &frameReady, VK_TRUE, UINT64_MAX);
-
-        // Destroy swap dependent resources
+        if (!pDeviceContext->resizeSwapResources(static_cast<uint32_t>(width), static_cast<uint32_t>(height)))
         {
-            for (auto& framebuffer : swapFramebuffers) {
-                vkDestroyFramebuffer(device, framebuffer, nullptr);
-            }
-            swapFramebuffers.clear();
-        }
-
-        // Recreate swap chain & swap resources
-        {
-            // Destroy depth stencil texture & view
-            vkDestroyImageView(device, depthStencilView, nullptr);
-            depthStencilTexture.destroy();
-
-            // Destroy swap views
-            for (auto& view : swapImageViews) {
-                vkDestroyImageView(device, view, nullptr);
-            }
-            swapImageViews.clear();
-            swapImages.clear();
-
-            // Query new surface capabilites
-            VkSurfaceCapabilitiesKHR surfaceCaps{};
-            vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCaps);
-
-            // Recreate swap chain & destroy old swap chain
-            swapchainCreateInfo.minImageCount = (surfaceCaps.maxImageCount == 0 || surfaceCaps.minImageCount + 1 < surfaceCaps.maxImageCount) ?
-                surfaceCaps.minImageCount + 1 : surfaceCaps.maxImageCount;
-            swapchainCreateInfo.imageExtent = (surfaceCaps.currentExtent.width == UINT32_MAX || surfaceCaps.currentExtent.height == UINT32_MAX) ?
-                VkExtent2D{ static_cast<uint32_t>(width), static_cast<uint32_t>(height) } : surfaceCaps.currentExtent;
-            swapchainCreateInfo.oldSwapchain = swapchain;
-
-            if (VK_FAILED(vkCreateSwapchainKHR(device, &swapchainCreateInfo, nullptr, &swapchain)))
-            {
-                printf("Vulkan swap chain resize failed\n");
-                return;
-            }
-            vkDestroySwapchainKHR(device, swapchainCreateInfo.oldSwapchain, nullptr);
-
-            // Fetch swap images & recreate views
-            uint32_t swapImageCount = 0;
-            vkGetSwapchainImagesKHR(device, swapchain, &swapImageCount, nullptr);
-            swapImages.resize(swapImageCount);
-            vkGetSwapchainImagesKHR(device, swapchain, &swapImageCount, swapImages.data());
-
-            swapImageViews.reserve(swapImages.size());
-            for (auto& image : swapImages)
-            {
-                VkImageViewCreateInfo swapViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-                swapViewCreateInfo.flags = 0;
-                swapViewCreateInfo.image = image;
-                swapViewCreateInfo.format = swapchainCreateInfo.imageFormat;
-                swapViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-                swapViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-                swapViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-                swapViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-                swapViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-                swapViewCreateInfo.subresourceRange.baseMipLevel = 0;
-                swapViewCreateInfo.subresourceRange.levelCount = 1;
-                swapViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-                swapViewCreateInfo.subresourceRange.layerCount = 1;
-                swapViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-                VkImageView view = VK_NULL_HANDLE;
-                vkCreateImageView(device, &swapViewCreateInfo, nullptr, &view);
-                assert(view != VK_NULL_HANDLE);
-                swapImageViews.push_back(view);
-            }
-
-            // Create depth stencil texture & view
-            if (!createTexture(
-                depthStencilTexture,
-                device,
-                VK_IMAGE_TYPE_2D,
-                VK_FORMAT_D32_SFLOAT,
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1
-            ))
-            {
-                printf("Vulkan depth stencil texture create failed\n");
-                isRunning = false;
-            }
-
-            VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-            depthStencilViewCreateInfo.flags = 0;
-            depthStencilViewCreateInfo.image = depthStencilTexture.handle;
-            depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            depthStencilViewCreateInfo.format = depthStencilTexture.format;
-            depthStencilViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-            depthStencilViewCreateInfo.subresourceRange.baseMipLevel = 0;
-            depthStencilViewCreateInfo.subresourceRange.levelCount = depthStencilTexture.levels;
-            depthStencilViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-            depthStencilViewCreateInfo.subresourceRange.layerCount = depthStencilTexture.depthOrLayers;
-            depthStencilViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-
-            if (VK_FAILED(vkCreateImageView(device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
-            {
-                printf("Vulkan depth stencil view create failed\n");
-                isRunning = false;
-            }
-        }
-
-        // Recreate swap dependent resources
-        {
-            swapFramebuffers.reserve(swapImageViews.size());
-            for (auto& swapView : swapImageViews)
-            {
-                VkExtent2D const swapExtent = swapchainCreateInfo.imageExtent;
-                VkImageView attachments[] = { swapView, depthStencilView, };
-
-                VkFramebufferCreateInfo framebufferCreateInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
-                framebufferCreateInfo.flags = 0;
-                framebufferCreateInfo.renderPass = renderPass;
-                framebufferCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
-                framebufferCreateInfo.pAttachments = attachments;
-                framebufferCreateInfo.width = swapExtent.width;
-                framebufferCreateInfo.height = swapExtent.height;
-                framebufferCreateInfo.layers = 1;
-
-                VkFramebuffer framebuffer = VK_NULL_HANDLE;
-                vkCreateFramebuffer(device, &framebufferCreateInfo, nullptr, &framebuffer);
-                assert(framebuffer != VK_NULL_HANDLE);
-                swapFramebuffers.push_back(framebuffer);
-            }
+            printf("VK Renderer swap resource resize failed\n");
+            isRunning = false;
         }
 
         // Set viewport & scissor
         float viewportWidth = static_cast<float>(width);
         float viewportHeight = static_cast<float>(height);
         viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -1.0F * viewportHeight, 0.0F, 1.0F }; // viewport height hack is needed because of OpenGL / Vulkan viewport differences
-        scissor = VkRect2D{ VkOffset2D{ 0, 0 }, swapchainCreateInfo.imageExtent };
+        scissor = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ static_cast<uint32_t>(width), static_cast<uint32_t>(height) }};
 
         // Update camera aspect ratio
         camera.aspectRatio = static_cast<float>(width) / static_cast<float>(height);
@@ -1978,24 +1122,16 @@ namespace Engine
 
     void render()
     {
-        // Acquire next backbuffer
-        uint32_t backbufferIndex = 0;
-        vkWaitForFences(device, 1, &frameReady, VK_TRUE, UINT64_MAX);
-        switch (vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, swapAvailable, VK_NULL_HANDLE, &backbufferIndex))
-        {
-        case VK_SUCCESS:
-            break;
-        case VK_ERROR_OUT_OF_DATE_KHR:
-        case VK_SUBOPTIMAL_KHR:
+        // Await & start new frame
+        vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->frameReady, VK_TRUE, UINT64_MAX);
+        if (!pDeviceContext->newFrame()) {
             resize();
             return;
-        default:
-            isRunning = false;
-            break;
         }
 
-        vkResetFences(device, 1, &frameReady);
-        vkResetCommandBuffer(commandBuffer, 0 /* no flags */);
+        uint32_t backbufferIndex = pDeviceContext->getCurrentBackbufferIndex();
+        vkResetFences(pDeviceContext->device, 1, &pDeviceContext->frameReady);
+        vkResetCommandBuffer(pDeviceContext->commandBuffer, 0 /* no flags */);
 
         // Record frame commands
         {
@@ -2003,49 +1139,49 @@ namespace Engine
             commandBeginInfo.flags = 0;
             commandBeginInfo.pInheritanceInfo = nullptr;
 
-            if (VK_FAILED(vkBeginCommandBuffer(commandBuffer, &commandBeginInfo)))
+            if (VK_FAILED(vkBeginCommandBuffer(pDeviceContext->commandBuffer, &commandBeginInfo)))
             {
                 printf("Vulkan command buffer begin failed\n");
                 isRunning = false;
                 return;
             }
 
-            VkExtent2D const swapExtent = swapchainCreateInfo.imageExtent;
+            VkExtent2D const swapExtent = pDeviceContext->swapchainCreateInfo.imageExtent;
             VkClearValue clearValues[] = {
                 VkClearValue{{ 0.1F, 0.1F, 0.1F, 1.0F }},
                 VkClearValue{{ 1.0F, 0x00 }},
             };
 
             VkRenderPassBeginInfo renderPassBeginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-            renderPassBeginInfo.renderPass = renderPass;
-            renderPassBeginInfo.framebuffer = swapFramebuffers[backbufferIndex];
+            renderPassBeginInfo.renderPass = pDeviceContext->renderPass;
+            renderPassBeginInfo.framebuffer = pDeviceContext->swapFramebuffers[backbufferIndex];
             renderPassBeginInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, swapExtent };
             renderPassBeginInfo.clearValueCount = SIZEOF_ARRAY(clearValues);
             renderPassBeginInfo.pClearValues = clearValues;
 
-            vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBeginRenderPass(pDeviceContext->commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
             // Bind graphics pipeline
-            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+            vkCmdSetViewport(pDeviceContext->commandBuffer, 0, 1, &viewport);
+            vkCmdSetScissor(pDeviceContext->commandBuffer, 0, 1, &scissor);
+            vkCmdBindPipeline(pDeviceContext->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
             // Bind descriptor sets
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+            vkCmdBindDescriptorSets(pDeviceContext->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
             // Draw mesh
             VkBuffer vertexBuffers[] = { mesh.vertexBuffer.handle, };
             VkDeviceSize offsets[] = { 0, };
-            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+            vkCmdBindVertexBuffers(pDeviceContext->commandBuffer, 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(pDeviceContext->commandBuffer, mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(pDeviceContext->commandBuffer, mesh.indexCount, 1, 0, 0, 0);
 
             // Draw GUI
-            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), pDeviceContext->commandBuffer);
 
-            vkCmdEndRenderPass(commandBuffer);
+            vkCmdEndRenderPass(pDeviceContext->commandBuffer);
 
-            if (VK_FAILED(vkEndCommandBuffer(commandBuffer)))
+            if (VK_FAILED(vkEndCommandBuffer(pDeviceContext->commandBuffer)))
             {
                 printf("Vulkan command buffer end failed\n");
                 isRunning = false;
@@ -2060,40 +1196,22 @@ namespace Engine
 
         VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
         submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = &swapAvailable;
+        submitInfo.pWaitSemaphores = &pDeviceContext->swapAvailable;
         submitInfo.pWaitDstStageMask = waitStages;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.pCommandBuffers = &pDeviceContext->commandBuffer;
         submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &swapReleased;
+        submitInfo.pSignalSemaphores = &pDeviceContext->swapReleased;
 
-        if (VK_FAILED(vkQueueSubmit(directQueue, 1, &submitInfo, frameReady)))
+        if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &submitInfo, pDeviceContext->frameReady)))
         {
             printf("Vulkan queue submit failed\n");
             isRunning = false;
             return;
         }
 
-        // Present current backbuffer
-        VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-        presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = &swapReleased;
-        presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains = &swapchain;
-        presentInfo.pImageIndices = &backbufferIndex;
-        presentInfo.pResults = nullptr;
-
-        switch (vkQueuePresentKHR(directQueue, &presentInfo))
-        {
-        case VK_SUCCESS:
-            break;
-        case VK_ERROR_OUT_OF_DATE_KHR:
-        case VK_SUBOPTIMAL_KHR:
+        if (!pDeviceContext->present()) {
             resize();
-            return;
-        default:
-            isRunning = false;
-            break;
         }
     }
 } // namespace Engine
