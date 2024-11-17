@@ -79,6 +79,8 @@ namespace Engine
         /// @brief Simple TRS transform.
         struct Transform
         {
+            /// @brief Calculate the transformation matrix for this transform.
+            /// @return 
             glm::mat4 matrix() const;
 
             glm::vec3 position = glm::vec3(0.0F);
@@ -89,6 +91,8 @@ namespace Engine
         /// @brief Virtual camera.
         struct Camera
         {
+            /// @brief Calculate the view and projection matrix for this camera.
+            /// @return 
             glm::mat4 matrix() const;
 
             // Camera transform
@@ -106,6 +110,7 @@ namespace Engine
         /// @brief Mesh representation with indexed vertices.
         struct Mesh
         {
+            /// @brief Destroy this mesh.
             void destroy();
 
             uint32_t vertexCount;
@@ -165,6 +170,7 @@ namespace Engine
 
     std::vector<VkFramebuffer> swapFramebuffers{};
 
+    // GUI data
     VkDescriptorPool imguiDescriptorPool = VK_NULL_HANDLE; //< descriptor pool specifically for ImGui usage
 
     // Per pass data
