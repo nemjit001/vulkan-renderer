@@ -24,3 +24,5 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 	- [ ] Linear skinning
 	- [ ] Blend shapes
 - [ ] Volumetric clouds (raymarched)
+
+![A sample image that was rendered using Vulkan renderer](render_sample.png?raw=true "Render Sample")
