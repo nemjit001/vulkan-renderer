@@ -120,7 +120,7 @@ public:
 
 	VkSemaphore swapAvailable = VK_NULL_HANDLE;
 	VkSemaphore swapReleased = VK_NULL_HANDLE;
-	VkFence frameReady = VK_NULL_HANDLE;
+	VkFence directQueueIdle = VK_NULL_HANDLE;
 
 	VkCommandPool commandPool = VK_NULL_HANDLE;
 	VkCommandBuffer commandBuffer = VK_NULL_HANDLE;

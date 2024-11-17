@@ -200,7 +200,7 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
 
         if (VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapAvailable))
             || VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapReleased))
-            || VK_FAILED(vkCreateFence(device, &fenceCreateInfo, nullptr, &frameReady)))
+            || VK_FAILED(vkCreateFence(device, &fenceCreateInfo, nullptr, &directQueueIdle)))
         {
             throw std::runtime_error("Vulkan sync primitive create failed");
         }
@@ -332,7 +332,7 @@ RenderDeviceContext::~RenderDeviceContext()
     vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     vkDestroyCommandPool(device, commandPool, nullptr);
 
-    vkDestroyFence(device, frameReady, nullptr);
+    vkDestroyFence(device, directQueueIdle, nullptr);
     vkDestroySemaphore(device, swapReleased, nullptr);
     vkDestroySemaphore(device, swapAvailable, nullptr);
 
@@ -391,7 +391,7 @@ bool RenderDeviceContext::present()
 bool RenderDeviceContext::resizeSwapResources(uint32_t width, uint32_t height)
 {
     // Wait for previous frame
-    vkWaitForFences(device, 1, &frameReady, VK_TRUE, UINT64_MAX);
+    vkWaitForFences(device, 1, &directQueueIdle, VK_TRUE, UINT64_MAX);
 
     // Destroy swap dependent resources
     {

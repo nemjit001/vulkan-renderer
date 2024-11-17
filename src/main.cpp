@@ -976,7 +976,7 @@ namespace Engine
     {
         printf("Shutting down Vulkan Renderer\n");
 
-        vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->frameReady, VK_TRUE, UINT64_MAX);
+        vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->directQueueIdle, VK_TRUE, UINT64_MAX);
 
         vkDestroyImageView(pDeviceContext->device, normalTextureView, nullptr);
         normalTexture.destroy();
@@ -1123,14 +1123,14 @@ namespace Engine
     void render()
     {
         // Await & start new frame
-        vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->frameReady, VK_TRUE, UINT64_MAX);
+        vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->directQueueIdle, VK_TRUE, UINT64_MAX);
         if (!pDeviceContext->newFrame()) {
             resize();
             return;
         }
 
         uint32_t backbufferIndex = pDeviceContext->getCurrentBackbufferIndex();
-        vkResetFences(pDeviceContext->device, 1, &pDeviceContext->frameReady);
+        vkResetFences(pDeviceContext->device, 1, &pDeviceContext->directQueueIdle);
         vkResetCommandBuffer(pDeviceContext->commandBuffer, 0 /* no flags */);
 
         // Record frame commands
@@ -1203,7 +1203,7 @@ namespace Engine
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &pDeviceContext->swapReleased;
 
-        if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &submitInfo, pDeviceContext->frameReady)))
+        if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &submitInfo, pDeviceContext->directQueueIdle)))
         {
             printf("Vulkan queue submit failed\n");
             isRunning = false;
