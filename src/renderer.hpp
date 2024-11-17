@@ -166,11 +166,23 @@ public:
 
 namespace Renderer
 {
+	/// @brief Initialize the render backend.
+	/// @param pWindow Associated window pointer.
+	/// @return 
 	bool init(SDL_Window* pWindow);
 
+	/// @brief Shut down the render backend.
 	void shutdown();
 
+	/// @brief Get the Vulkan instance handle.
+	/// @return 
 	VkInstance getInstance();
 
+	/// @brief Automatically pick a render device.
+	/// @return A pointer to a new render device, or NULL on failure.
 	RenderDeviceContext* pickRenderDevice();
+
+	/// @brief Destroy a render device context.
+	/// @param pContext 
+	void destroyRenderDeviceContext(RenderDeviceContext* pContext);
 }

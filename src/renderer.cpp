@@ -854,4 +854,13 @@ namespace Renderer
         SDL_GetWindowSize(pAssociatedWindow, &width, &height);
         return new RenderDeviceContext(physicalDevice, surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
     }
+
+    void destroyRenderDeviceContext(RenderDeviceContext* pContext)
+    {
+        if (pContext == nullptr) {
+            return;
+        }
+
+        delete pContext;
+    }
 }

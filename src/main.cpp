@@ -997,7 +997,7 @@ namespace Engine
         ImGui_ImplVulkan_Shutdown();
         vkDestroyDescriptorPool(pDeviceContext->device, imguiDescriptorPool, nullptr);
 
-        delete pDeviceContext;
+        Renderer::destroyRenderDeviceContext(pDeviceContext);
         Renderer::shutdown();
 
         ImGui_ImplSDL2_Shutdown();
