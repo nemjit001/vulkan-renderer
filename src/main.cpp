@@ -112,6 +112,16 @@ namespace Engine
     SDL_Window* pWindow = nullptr;
     Timer frameTimer{};
     RenderDeviceContext* pDeviceContext = nullptr;
+    uint32_t framebufferWidth = 0;
+    uint32_t framebufferHeight = 0;
+
+    // Depth stencil target
+    Texture depthStencilTexture{};
+    VkImageView depthStencilView = VK_NULL_HANDLE;
+
+    // Render pass & associated resources
+    VkRenderPass renderPass = VK_NULL_HANDLE;
+    std::vector<VkFramebuffer> framebuffers{};
 
     // GUI data
     VkDescriptorPool imguiDescriptorPool = VK_NULL_HANDLE; //< descriptor pool specifically for ImGui usage
@@ -125,9 +135,9 @@ namespace Engine
     VkRect2D scissor{};
 
     // Scene data
-    Buffer sceneDataBuffer{};
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+    Buffer sceneDataBuffer{};
 
     // Scene objects
     Camera camera{};
@@ -497,7 +507,145 @@ namespace Engine
             printf("VK Renderer renderer init failed\n");
             return false;
         }
+
         pDeviceContext = Renderer::pickRenderDevice();
+        if (pDeviceContext == nullptr)
+        {
+            printf("VK Renderer no device available\n");
+            return false;
+        }
+
+        framebufferWidth = DefaultWindowWidth;
+        framebufferHeight = DefaultWindowHeight;
+
+        // Create depth stencil target
+        {
+            if (!pDeviceContext->createTexture(
+                depthStencilTexture,
+                VK_IMAGE_TYPE_2D,
+                VK_FORMAT_D32_SFLOAT,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                framebufferWidth, framebufferHeight, 1
+            ))
+            {
+                printf("Vulkan depth stencil texture create failed\n");
+                return false;
+            }
+
+            VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+            depthStencilViewCreateInfo.flags = 0;
+            depthStencilViewCreateInfo.image = depthStencilTexture.handle;
+            depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            depthStencilViewCreateInfo.format = depthStencilTexture.format;
+            depthStencilViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.subresourceRange.baseMipLevel = 0;
+            depthStencilViewCreateInfo.subresourceRange.levelCount = depthStencilTexture.levels;
+            depthStencilViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+            depthStencilViewCreateInfo.subresourceRange.layerCount = depthStencilTexture.depthOrLayers;
+            depthStencilViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+            if (VK_FAILED(vkCreateImageView(pDeviceContext->device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
+            {
+                printf("Vulkan depth stencil view create failed\n");
+                return false;
+            }
+        }
+
+        // Create render pass
+        {
+            VkAttachmentDescription colorAttachment{};
+            colorAttachment.flags = 0;
+            colorAttachment.format = pDeviceContext->getSwapFormat();
+            colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+            colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+            VkAttachmentDescription depthStencilAttachment{};
+            depthStencilAttachment.flags = 0;
+            depthStencilAttachment.format = VK_FORMAT_D32_SFLOAT;
+            depthStencilAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+            depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            depthStencilAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            depthStencilAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            depthStencilAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            depthStencilAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+            VkAttachmentReference colorAttachmentRefs[] = {
+                VkAttachmentReference{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
+            };
+
+            VkAttachmentReference depthStencilAttachmentRef{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+
+            VkSubpassDescription forwardPass{};
+            forwardPass.flags = 0;
+            forwardPass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+            forwardPass.inputAttachmentCount = 0;
+            forwardPass.pInputAttachments = nullptr;
+            forwardPass.colorAttachmentCount = SIZEOF_ARRAY(colorAttachmentRefs);
+            forwardPass.pColorAttachments = colorAttachmentRefs;
+            forwardPass.pResolveAttachments = nullptr;
+            forwardPass.pDepthStencilAttachment = &depthStencilAttachmentRef;
+            forwardPass.preserveAttachmentCount = 0;
+            forwardPass.pPreserveAttachments = nullptr;
+
+            VkSubpassDependency previousFrameDependency{};
+            previousFrameDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+            previousFrameDependency.dstSubpass = 0;
+            previousFrameDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+            previousFrameDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            previousFrameDependency.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+            previousFrameDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+            VkAttachmentDescription attachments[] = { colorAttachment, depthStencilAttachment, };
+            VkSubpassDescription subpasses[] = { forwardPass, };
+            VkSubpassDependency dependencies[] = { previousFrameDependency, };
+            VkRenderPassCreateInfo renderPassCreateInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+            renderPassCreateInfo.flags = 0;
+            renderPassCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
+            renderPassCreateInfo.pAttachments = attachments;
+            renderPassCreateInfo.subpassCount = SIZEOF_ARRAY(subpasses);
+            renderPassCreateInfo.pSubpasses = subpasses;
+            renderPassCreateInfo.dependencyCount = SIZEOF_ARRAY(dependencies);
+            renderPassCreateInfo.pDependencies = dependencies;
+
+            if (VK_FAILED(vkCreateRenderPass(pDeviceContext->device, &renderPassCreateInfo, nullptr, &renderPass)))
+            {
+                throw std::runtime_error("Vulkan render pass create failed\n");
+            }
+        }
+
+        // Create framebuffers
+        {
+            auto const& backbuffers = pDeviceContext->getBackbuffers();
+            framebuffers.reserve(backbuffers.size());
+            for (auto& buffer : backbuffers)
+            {
+                VkImageView attachments[] = { buffer.view, depthStencilView, };
+
+                VkFramebufferCreateInfo framebufferCreateInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+                framebufferCreateInfo.flags = 0;
+                framebufferCreateInfo.renderPass = renderPass;
+                framebufferCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
+                framebufferCreateInfo.pAttachments = attachments;
+                framebufferCreateInfo.width = framebufferWidth;
+                framebufferCreateInfo.height = framebufferHeight;
+                framebufferCreateInfo.layers = 1;
+
+                VkFramebuffer framebuffer = VK_NULL_HANDLE;
+                vkCreateFramebuffer(pDeviceContext->device, &framebufferCreateInfo, nullptr, &framebuffer);
+                assert(framebuffer != VK_NULL_HANDLE);
+                framebuffers.push_back(framebuffer);
+            }
+        }
 
         // Init ImGui for Vulkan
         {
@@ -524,9 +672,9 @@ namespace Engine
             initInfo.QueueFamily = pDeviceContext->directQueueFamily;
             initInfo.Queue = pDeviceContext->directQueue;
             initInfo.DescriptorPool = imguiDescriptorPool;
-            initInfo.RenderPass = pDeviceContext->renderPass;
-            initInfo.MinImageCount = pDeviceContext->swapchainCreateInfo.minImageCount;
-            initInfo.ImageCount = pDeviceContext->swapchainCreateInfo.minImageCount;
+            initInfo.RenderPass = renderPass;
+            initInfo.MinImageCount = pDeviceContext->backbufferCount();
+            initInfo.ImageCount = pDeviceContext->backbufferCount();
             initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
             initInfo.PipelineCache = VK_NULL_HANDLE;
             initInfo.Subpass = 0;
@@ -691,10 +839,10 @@ namespace Engine
             inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             inputAssemblyState.primitiveRestartEnable = VK_FALSE;
 
-            float viewportWidth = static_cast<float>(pDeviceContext->swapchainCreateInfo.imageExtent.width);
-            float viewportHeight = static_cast<float>(pDeviceContext->swapchainCreateInfo.imageExtent.height);
+            float viewportWidth = static_cast<float>(framebufferWidth);
+            float viewportHeight = static_cast<float>(framebufferHeight);
             viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -1.0F * viewportHeight, 0.0F, 1.0F }; // viewport height hack is needed because of OpenGL / Vulkan viewport differences
-            scissor = VkRect2D{ VkOffset2D{ 0, 0 }, pDeviceContext->swapchainCreateInfo.imageExtent };
+            scissor = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight } };
 
             VkPipelineViewportStateCreateInfo viewportState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
             viewportState.flags = 0;
@@ -791,7 +939,7 @@ namespace Engine
             graphicsPipelineCreateInfo.pColorBlendState = &colorBlendState;
             graphicsPipelineCreateInfo.pDynamicState = &dynamicState;
             graphicsPipelineCreateInfo.layout = pipelineLayout;
-            graphicsPipelineCreateInfo.renderPass = pDeviceContext->renderPass;
+            graphicsPipelineCreateInfo.renderPass = renderPass;
             graphicsPipelineCreateInfo.subpass = 0;
             graphicsPipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
             graphicsPipelineCreateInfo.basePipelineIndex = 0;
@@ -808,12 +956,6 @@ namespace Engine
 
         // Create uniform buffer with descriptor pool & descriptor sets
         {
-            if (!pDeviceContext->createBuffer(sceneDataBuffer, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
-            {
-                printf("Vulkan scene data buffer create failed\n");
-                return false;
-            }
-
             VkDescriptorPoolSize poolSizes[] = {
                 VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
                 VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
@@ -839,6 +981,12 @@ namespace Engine
             if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &descriptorSetAllocInfo, &descriptorSet)))
             {
                 printf("Vulkan descriptor set allocation failed\n");
+                return false;
+            }
+
+            if (!pDeviceContext->createBuffer(sceneDataBuffer, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
+            {
+                printf("Vulkan scene data buffer create failed\n");
                 return false;
             }
         }
@@ -976,9 +1124,10 @@ namespace Engine
 
         mesh.destroy();
 
-        vkDestroyDescriptorPool(pDeviceContext->device, descriptorPool, nullptr);
         sceneDataBuffer.unmap();
         sceneDataBuffer.destroy();
+
+        vkDestroyDescriptorPool(pDeviceContext->device, descriptorPool, nullptr);
 
         vkDestroyPipeline(pDeviceContext->device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(pDeviceContext->device, pipelineLayout, nullptr);
@@ -987,6 +1136,15 @@ namespace Engine
 
         ImGui_ImplVulkan_Shutdown();
         vkDestroyDescriptorPool(pDeviceContext->device, imguiDescriptorPool, nullptr);
+
+        for (auto& framebuffer : framebuffers) {
+            vkDestroyFramebuffer(pDeviceContext->device, framebuffer, nullptr);
+        }
+
+        vkDestroyRenderPass(pDeviceContext->device, renderPass, nullptr);
+
+        vkDestroyImageView(pDeviceContext->device, depthStencilView, nullptr);
+        depthStencilTexture.destroy();
 
         Renderer::destroyRenderDeviceContext(pDeviceContext);
         Renderer::shutdown();
@@ -1009,22 +1167,94 @@ namespace Engine
         }
 
         printf("Window resized (%d x %d)\n", width, height);
+        framebufferWidth = static_cast<uint32_t>(width);
+        framebufferHeight = static_cast<uint32_t>(height);
 
         vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->directQueueIdle, VK_TRUE, UINT64_MAX);
-        if (!pDeviceContext->resizeSwapResources(static_cast<uint32_t>(width), static_cast<uint32_t>(height)))
+
+        // Destroy swap dependent resources
         {
-            printf("VK Renderer swap resource resize failed\n");
-            isRunning = false;
+            for (auto& framebuffer : framebuffers) {
+                vkDestroyFramebuffer(pDeviceContext->device, framebuffer, nullptr);
+            }
+            framebuffers.clear();
+
+            vkDestroyImageView(pDeviceContext->device, depthStencilView, nullptr);
+            depthStencilTexture.destroy();
+        }
+
+        // Recreate swap dependent resources
+        {
+            if (!pDeviceContext->resizeSwapResources(framebufferWidth, framebufferHeight))
+            {
+                printf("VK Renderer swap resource resize failed\n");
+                isRunning = false;
+            }
+
+            if (!pDeviceContext->createTexture(
+                depthStencilTexture,
+                VK_IMAGE_TYPE_2D,
+                VK_FORMAT_D32_SFLOAT,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                framebufferWidth, framebufferHeight, 1
+            ))
+            {
+                printf("Vulkan depth stencil texture create failed\n");
+                isRunning = false;
+            }
+
+            VkImageViewCreateInfo depthStencilViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+            depthStencilViewCreateInfo.flags = 0;
+            depthStencilViewCreateInfo.image = depthStencilTexture.handle;
+            depthStencilViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            depthStencilViewCreateInfo.format = depthStencilTexture.format;
+            depthStencilViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+            depthStencilViewCreateInfo.subresourceRange.baseMipLevel = 0;
+            depthStencilViewCreateInfo.subresourceRange.levelCount = depthStencilTexture.levels;
+            depthStencilViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+            depthStencilViewCreateInfo.subresourceRange.layerCount = depthStencilTexture.depthOrLayers;
+            depthStencilViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+            if (VK_FAILED(vkCreateImageView(pDeviceContext->device, &depthStencilViewCreateInfo, nullptr, &depthStencilView)))
+            {
+                printf("Vulkan depth stencil view create failed\n");
+                isRunning = false;
+            }
+
+            auto const& backbuffers = pDeviceContext->getBackbuffers();
+            framebuffers.reserve(backbuffers.size());
+            for (auto& buffer : backbuffers)
+            {
+                VkImageView attachments[] = { buffer.view, depthStencilView, };
+
+                VkFramebufferCreateInfo framebufferCreateInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+                framebufferCreateInfo.flags = 0;
+                framebufferCreateInfo.renderPass = renderPass;
+                framebufferCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
+                framebufferCreateInfo.pAttachments = attachments;
+                framebufferCreateInfo.width = framebufferWidth;
+                framebufferCreateInfo.height = framebufferHeight;
+                framebufferCreateInfo.layers = 1;
+
+                VkFramebuffer framebuffer = VK_NULL_HANDLE;
+                vkCreateFramebuffer(pDeviceContext->device, &framebufferCreateInfo, nullptr, &framebuffer);
+                assert(framebuffer != VK_NULL_HANDLE);
+                framebuffers.push_back(framebuffer);
+            }
         }
 
         // Set viewport & scissor
-        float viewportWidth = static_cast<float>(width);
-        float viewportHeight = static_cast<float>(height);
+        float viewportWidth = static_cast<float>(framebufferWidth);
+        float viewportHeight = static_cast<float>(framebufferHeight);
         viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -1.0F * viewportHeight, 0.0F, 1.0F }; // viewport height hack is needed because of OpenGL / Vulkan viewport differences
-        scissor = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ static_cast<uint32_t>(width), static_cast<uint32_t>(height) }};
+        scissor = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight, }};
 
         // Update camera aspect ratio
-        camera.aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+        camera.aspectRatio = viewportWidth / viewportHeight;
     }
 
     void update()
@@ -1066,6 +1296,7 @@ namespace Engine
         if (ImGui::Begin("Vulkan Renderer Config"))
         {
             ImGui::SeparatorText("Statistics");
+            ImGui::Text("Framebuffer size: (%u, %u)", framebufferWidth, framebufferHeight);
             ImGui::Text("Frame time: %10.2f ms", frameTimer.deltaTimeMS());
             ImGui::Text("FPS:        %10.2f fps", 1'000.0 / frameTimer.deltaTimeMS());
 
@@ -1139,16 +1370,16 @@ namespace Engine
                 return;
             }
 
-            VkExtent2D const swapExtent = pDeviceContext->swapchainCreateInfo.imageExtent;
+            // Begin render pass
             VkClearValue clearValues[] = {
                 VkClearValue{{ 0.1F, 0.1F, 0.1F, 1.0F }},
                 VkClearValue{{ 1.0F, 0x00 }},
             };
 
             VkRenderPassBeginInfo renderPassBeginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-            renderPassBeginInfo.renderPass = pDeviceContext->renderPass;
-            renderPassBeginInfo.framebuffer = pDeviceContext->swapFramebuffers[backbufferIndex];
-            renderPassBeginInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, swapExtent };
+            renderPassBeginInfo.renderPass = renderPass;
+            renderPassBeginInfo.framebuffer = framebuffers[backbufferIndex];
+            renderPassBeginInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight } };
             renderPassBeginInfo.clearValueCount = SIZEOF_ARRAY(clearValues);
             renderPassBeginInfo.pClearValues = clearValues;
 

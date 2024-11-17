@@ -9,6 +9,14 @@
 #define SIZEOF_ARRAY(val)   (sizeof((val)) / sizeof((val)[0]))
 #define VK_FAILED(expr)     ((expr) != VK_SUCCESS)
 
+/// @brief Swap chain backbuffer.
+struct Backbuffer
+{
+	VkFormat format;
+	VkImage image;
+	VkImageView view;
+};
+
 /// @brief GPU buffer with associated data.
 struct Buffer
 {
@@ -115,9 +123,21 @@ public:
 		VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
 	);
 
-	/// @brief Retrieve the current backbuffer index.
+	/// @brief Get the swap chain image format.
+	/// @return 
+	VkFormat getSwapFormat() const;
+
+	/// @brief Get the current backbuffer index.
 	/// @return 
 	uint32_t getCurrentBackbufferIndex() const;
+
+	/// @brief Get the number of backbuffers.
+	/// @return 
+	uint32_t backbufferCount() const;
+
+	/// @brief Get the swap chain backbuffers
+	/// @return 
+	std::vector<Backbuffer> getBackbuffers() const;
 
 private:
     /// @brief Find a device queue family based on required and exclusion flags.
@@ -143,25 +163,31 @@ public:
 	VkDevice device = VK_NULL_HANDLE;
 	VkQueue directQueue = VK_NULL_HANDLE;
 
-	VkSwapchainCreateInfoKHR swapchainCreateInfo{};
-	VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-	std::vector<VkImage> swapImages{};
-	std::vector<VkImageView> swapImageViews{};
-	Texture depthStencilTexture{};
-	VkImageView depthStencilView = VK_NULL_HANDLE;
+	//VkSwapchainCreateInfoKHR swapchainCreateInfo{};
+	//VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+	//std::vector<VkImage> swapImages{};
+	//std::vector<VkImageView> swapImageViews{};
+	//std::vector<Backbuffer> backbuffers;
 
+	// TODO(nemjit001): use fence based swap synchronization (same queue).
 	VkSemaphore swapAvailable = VK_NULL_HANDLE;
 	VkSemaphore swapReleased = VK_NULL_HANDLE;
 	VkFence directQueueIdle = VK_NULL_HANDLE;
 
+	// TODO(nemjit001): move command buffer & command sync into a command context structure
 	VkCommandPool commandPool = VK_NULL_HANDLE;
 	VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
 
-	VkRenderPass renderPass = VK_NULL_HANDLE;
+	// uint32_t backbufferIndex = 0;
 
-	std::vector<VkFramebuffer> swapFramebuffers{};
+private:
+	VkSwapchainCreateInfoKHR m_swapchainCreateInfo{};
+	VkSwapchainKHR m_swapchain = VK_NULL_HANDLE;
+	std::vector<VkImage> m_swapImages{};
+	std::vector<VkImageView> m_swapImageViews{};
+	std::vector<Backbuffer> m_backbuffers;
 
-	uint32_t backbufferIndex = 0;
+	uint32_t m_backbufferIndex = 0;
 };
 
 namespace Renderer
