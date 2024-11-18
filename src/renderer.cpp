@@ -8,6 +8,10 @@
 
 void Buffer::destroy()
 {
+    if (device == VK_NULL_HANDLE) {
+        return;
+    }
+
     if (mapped) {
         unmap();
     }
@@ -33,6 +37,10 @@ void Buffer::unmap()
 
 void Texture::destroy()
 {
+    if (device == VK_NULL_HANDLE) {
+        return;
+    }
+
     vkFreeMemory(device, memory, nullptr);
     vkDestroyImage(device, handle, nullptr);
 }
@@ -410,6 +418,18 @@ bool RenderDeviceContext::createTexture(
     texture.height = height;
     texture.depthOrLayers = depth == 1 ? layers : depth;
     texture.levels = levels;
+
+    VkImageFormatProperties formatProperties{};
+    vkGetPhysicalDeviceImageFormatProperties(physicalDevice, format, imageType, tiling, usage, 0, &formatProperties);
+    if (formatProperties.maxExtent.width < width
+        || formatProperties.maxExtent.height < height
+        || formatProperties.maxExtent.depth < depth
+        || formatProperties.maxMipLevels < levels
+        || formatProperties.maxArrayLayers < layers
+        || (formatProperties.sampleCounts & samples) == 0)
+    {
+        return false;
+    }
 
     VkImageCreateInfo imageCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     imageCreateInfo.flags = 0;

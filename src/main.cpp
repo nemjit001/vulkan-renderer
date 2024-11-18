@@ -311,8 +311,12 @@ namespace Engine
             }
             printf("Loaded texture [%s] (%d x %d x %d)\n", path, width, height, channels);
 
+            // Load all images as 4 channel color targets
+            VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+            channels = 4;
+
             Buffer uploadBuffer{};
-            if (!pDeviceContext->createBuffer(uploadBuffer, width * height * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true)) {
+            if (!pDeviceContext->createBuffer(uploadBuffer, width * height * channels, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true)) {
                 stbi_image_free(pImageData);
                 return false;
             }
@@ -323,7 +327,7 @@ namespace Engine
             if (!pDeviceContext->createTexture(
                 texture,
                 VK_IMAGE_TYPE_2D,
-                VK_FORMAT_R8G8B8A8_UNORM,
+                imageFormat,
                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                 static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1
@@ -1183,14 +1187,14 @@ namespace Engine
             depthStencilTexture.destroy();
         }
 
+        if (!pDeviceContext->resizeSwapResources(framebufferWidth, framebufferHeight))
+        {
+            printf("VK Renderer swap resource resize failed\n");
+            isRunning = false;
+        }
+
         // Recreate swap dependent resources
         {
-            if (!pDeviceContext->resizeSwapResources(framebufferWidth, framebufferHeight))
-            {
-                printf("VK Renderer swap resource resize failed\n");
-                isRunning = false;
-            }
-
             if (!pDeviceContext->createTexture(
                 depthStencilTexture,
                 VK_IMAGE_TYPE_2D,
