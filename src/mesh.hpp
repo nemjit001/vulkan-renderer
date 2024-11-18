@@ -27,7 +27,7 @@ struct Mesh
     Buffer indexBuffer{};
 };
 
-/// @brief Create a mesh object.
+/// @brief Create a mesh object, uploads vertex data to GPU memory.
 /// @param pDeviceContext Render device context to use for mesh creation.
 /// @param mesh Mesh to initialize.
 /// @param vertices 

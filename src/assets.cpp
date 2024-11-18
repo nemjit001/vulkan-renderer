@@ -131,6 +131,7 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
 
     assert(uploadBuffer.mapped && uploadBuffer.pData != nullptr);
     memcpy(uploadBuffer.pData, pImageData, uploadBuffer.size);
+    stbi_image_free(pImageData);
 
     if (!pDeviceContext->createTexture(
         texture,
@@ -152,7 +153,6 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         if (!pDeviceContext->createCommandBuffer(CommandQueueType::Copy, &uploadCommandBuffer))
         {
             uploadBuffer.destroy();
-            stbi_image_free(pImageData);
             return false;
         }
 
@@ -164,7 +164,6 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         {
             pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
             uploadBuffer.destroy();
-            stbi_image_free(pImageData);
             return false;
         }
 
@@ -309,16 +308,14 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         {
             pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
             uploadBuffer.destroy();
-            stbi_image_free(pImageData);
             return false;
         }
 
         VkFence uploadFence = VK_NULL_HANDLE;
         if (!pDeviceContext->createFence(&uploadFence, false))
         {
-            pDeviceContext->destroyFence(uploadFence);
+            pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
             uploadBuffer.destroy();
-            stbi_image_free(pImageData);
             return false;
         }
 
@@ -333,10 +330,9 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
 
         if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &uploadSubmit, uploadFence)))
         {
-            vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
+            pDeviceContext->destroyFence(uploadFence);
             pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
             uploadBuffer.destroy();
-            stbi_image_free(pImageData);
             return false;
         }
 
@@ -346,6 +342,5 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
     }
 
     uploadBuffer.destroy();
-    stbi_image_free(pImageData);
     return true;
 }
