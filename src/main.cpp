@@ -610,9 +610,9 @@ namespace Engine
             }
 
             scene = Scene(pDeviceContext, sceneDataSet);
-            scene.camera.position = glm::vec3(0.0F, 0.0F, -5.0F);
-            scene.camera.forward = glm::normalize(glm::vec3(0.0F) - scene.camera.position);
-            scene.camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
+            scene.cameraTransform.position = glm::vec3(0.0F, 0.0F, -5.0F);
+            scene.camera.type = CameraType::Perspective;
+            scene.camera.perspective.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
         }
 
         // Set up scene object data
@@ -893,7 +893,7 @@ namespace Engine
         scissor = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight, }};
 
         // Update camera aspect ratio
-        scene.camera.aspectRatio = viewportWidth / viewportHeight;
+        scene.camera.perspective.aspectRatio = viewportWidth / viewportHeight;
     }
 
     void update()
@@ -929,8 +929,6 @@ namespace Engine
         }
 
         // Update scene data
-        scene.camera.position = glm::vec3(0.0F, 2.0F, -5.0F);
-        scene.camera.forward = glm::normalize(glm::vec3(0.0F) - scene.camera.position);
         scene.update();
 
         cpuUpdateTimer.tick();
@@ -967,6 +965,15 @@ namespace Engine
             ImGui::DragFloat("Sun Zenith", &scene.sunZenith, 1.0F, -90.0F, 90.0F);
             ImGui::ColorEdit3("Sun Color", &scene.sunColor[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
             ImGui::ColorEdit3("Ambient Light", &scene.ambientLight[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
+
+            glm::vec3 rotation = glm::degrees(glm::eulerAngles(scene.cameraTransform.rotation));
+            ImGui::SeparatorText("Camera");
+            ImGui::Text("FOV y:  %10.2f", scene.camera.perspective.FOVy);
+            ImGui::Text("Z Near: %10.2f", scene.camera.perspective.zNear);
+            ImGui::Text("Z Far:  %10.2f", scene.camera.perspective.zFar);
+            ImGui::DragFloat3("Position", &scene.cameraTransform.position[0], 0.1F);
+            ImGui::DragFloat3("Rotation", &rotation[0], 0.1F);
+            scene.cameraTransform.rotation = glm::quat(glm::radians(rotation));
 
             // TODO(nemjit001): Implement per-object data editing
             // ImGui::SeparatorText("Object data");

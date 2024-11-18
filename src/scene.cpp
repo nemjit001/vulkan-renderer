@@ -29,9 +29,33 @@ glm::mat4 Transform::matrix() const
         * glm::scale(glm::identity<glm::mat4>(), scale);
 }
 
+glm::mat4 PerspectiveCamera::matrix() const
+{
+    return glm::perspective(glm::radians(FOVy), aspectRatio, zNear, zFar);
+}
+
+glm::mat4 OrthographicCamera::matrix() const
+{
+    return glm::ortho(
+        -0.5F * xMag, 0.5F * xMag,
+        -0.5F * yMag, 0.5F * yMag,
+        zNear, zFar
+    );
+}
+
 glm::mat4 Camera::matrix() const
 {
-    return glm::perspective(glm::radians(FOVy), aspectRatio, zNear, zFar) * glm::lookAt(position, position + forward, up);
+    switch (type)
+    {
+    case CameraType::Perspective:
+        return perspective.matrix();
+    case CameraType::Orthographic:
+        return ortho.matrix();
+    default:
+        break;
+    }
+
+    return glm::identity<glm::mat4>();
 }
 
 Object::Object(
@@ -48,7 +72,7 @@ Object::Object(
     colorTextureView(colorTextureView),
     normalTextureView(normalTextureView)
 {
-    if (!pDeviceContext->createBuffer(objectDataBuffer, sizeof(UniformObjectData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
+    if (!pDeviceContext->createBuffer(objectDataBuffer, sizeof(UniformObjectData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
     {
         throw std::runtime_error("VK Renderer object data buffer create failed");
     }
@@ -103,6 +127,8 @@ void Object::destroy()
 
 void Object::update()
 {
+    objectDataBuffer.map();
+
     UniformObjectData objectData{};
     objectData.model = transform.matrix();
     objectData.normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(objectData.model))));
@@ -110,6 +136,7 @@ void Object::update()
 
     assert(objectDataBuffer.mapped);
     memcpy(objectDataBuffer.pData, &objectData, sizeof(UniformObjectData));
+    objectDataBuffer.unmap();
 }
 
 Scene::Scene(RenderDeviceContext* pDeviceContext, VkDescriptorSet sceneDataSet)
@@ -138,7 +165,7 @@ Scene::Scene(RenderDeviceContext* pDeviceContext, VkDescriptorSet sceneDataSet)
 
     // Set up scene uniform buffer
     {
-        if (!pDeviceContext->createBuffer(sceneDataBuffer, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
+        if (!pDeviceContext->createBuffer(sceneDataBuffer, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
         {
             throw std::runtime_error("Vulkan scene data buffer create failed");
         }
@@ -184,6 +211,11 @@ void Scene::destroy()
 
 void Scene::update()
 {
+    sceneDataBuffer.map();
+
+    glm::vec3 const camForward = glm::normalize(glm::vec3(cameraTransform.matrix() * glm::vec4(FORWARD, 0.0F)));
+    glm::vec3 const camUp = glm::normalize(glm::vec3(cameraTransform.matrix() * glm::vec4(UP, 0.0F)));
+
     UniformSceneData sceneData{};
     sceneData.sunDirection = glm::normalize(glm::vec3{
         glm::cos(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
@@ -192,11 +224,12 @@ void Scene::update()
     });
     sceneData.sunColor = sunColor;
     sceneData.ambientLight = ambientLight;
-    sceneData.cameraPosition = glm::vec3(0.0F, 0.0F, -5.0F);
-    sceneData.viewproject = camera.matrix();
+    sceneData.cameraPosition = cameraTransform.position;
+    sceneData.viewproject = camera.matrix() * glm::lookAt(cameraTransform.position, cameraTransform.position + camForward, camUp);
 
     assert(sceneDataBuffer.mapped);
     memcpy(sceneDataBuffer.pData, &sceneData, sizeof(UniformSceneData));
+    sceneDataBuffer.unmap();
 
     // Update object data in scene
     for (auto& object : objects) {

@@ -13,7 +13,7 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 - [X] ImGui support
 - [ ] Virtual camera support
 	- [X] Perspective camera
-	- [ ] Orthographic camera
+	- [X] Orthographic camera
 	- [ ] Camera controller
 - [ ] Scene loading (glTF2.0)
 - [ ] Lights

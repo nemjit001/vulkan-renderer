@@ -4,6 +4,10 @@
 #include "mesh.hpp"
 #include "renderer.hpp"
 
+constexpr glm::vec3 FORWARD = glm::vec3(0.0F, 0.0F, 1.0F);
+constexpr glm::vec3 UP      = glm::vec3(0.0F, 1.0F, 0.0F);
+constexpr glm::vec3 RIGHT   = glm::vec3(1.0F, 0.0F, 0.0F);
+
 /// @brief Simple TRS transform.
 struct Transform
 {
@@ -16,23 +20,50 @@ struct Transform
     glm::vec3 scale = glm::vec3(1.0F);
 };
 
-/// @brief Virtual camera.
-struct Camera
+/// @brief Virtual perspective camera.
+struct PerspectiveCamera
 {
-    /// @brief Calculate the view and projection matrix for this camera.
+    /// @brief Calculate the projection matrix for this camera.
     /// @return 
     glm::mat4 matrix() const;
-
-    // Camera transform
-    glm::vec3 position = glm::vec3(0.0F);
-    glm::vec3 forward = glm::vec3(0.0F, 0.0F, 1.0F);
-    glm::vec3 up = glm::vec3(0.0F, 1.0F, 0.0F);
 
     // Perspective camera data
     float FOVy = 60.0F;
     float aspectRatio = 1.0F;
     float zNear = 0.1F;
     float zFar = 100.0F;
+};
+
+struct OrthographicCamera
+{
+    /// @brief Calculate the projection matrix for this camera.
+    /// @return 
+    glm::mat4 matrix() const;
+
+    float xMag = 1.0F;
+    float yMag = 1.0F;
+    float zNear = 0.1F;
+    float zFar = 100.0F;
+};
+
+enum class CameraType : uint8_t
+{
+    Perspective = 0,
+    Orthographic = 1,
+};
+
+struct Camera
+{
+    /// @brief Calculate the projection matrix for this camera.
+    /// @return 
+    glm::mat4 matrix() const;
+
+    CameraType type = CameraType::Perspective;
+    union
+    {
+        PerspectiveCamera perspective;
+        OrthographicCamera ortho;
+    };
 };
 
 /// @brief Renderable object.
@@ -88,8 +119,8 @@ public:
 public:
     static constexpr uint32_t MaxSceneObjects = 1024;
 
-    RenderDeviceContext* pDeviceContext;
-    VkDescriptorSet sceneDataSet;
+    RenderDeviceContext* pDeviceContext = nullptr;
+    VkDescriptorSet sceneDataSet = VK_NULL_HANDLE;
 
     VkDescriptorPool objectDescriptorPool = VK_NULL_HANDLE;
     Buffer sceneDataBuffer{};
@@ -102,6 +133,7 @@ public:
     float sunZenith = 0.0F;
     glm::vec3 sunColor = glm::vec3(1.0F);
     glm::vec3 ambientLight = glm::vec3(0.1F);
+    Transform cameraTransform{};
     Camera camera{};
 
     std::vector<Object> objects{};
