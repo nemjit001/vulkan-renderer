@@ -593,10 +593,7 @@ namespace Engine
                 printf("Vulkan scene descriptor pool create failed\n");
                 return false;
             }
-        }
 
-        // Set up scene data
-        {
             VkDescriptorSetAllocateInfo sceneDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
             sceneDataSetAllocInfo.descriptorPool = sceneDescriptorPool;
             sceneDataSetAllocInfo.descriptorSetCount = 1;
