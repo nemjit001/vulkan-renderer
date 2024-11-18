@@ -313,10 +313,19 @@ namespace Engine
 
             // Load all images as 4 channel color targets
             VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+            uint32_t mipLevels = static_cast<uint32_t>(std::log2(std::max(width, height))) + 1;
             channels = 4;
 
+            printf("Texture has %d mip levels\n", mipLevels);
+
             Buffer uploadBuffer{};
-            if (!pDeviceContext->createBuffer(uploadBuffer, width * height * channels, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true)) {
+            if (!pDeviceContext->createBuffer(
+                uploadBuffer,
+                width * height * channels,
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                true
+            )) {
                 stbi_image_free(pImageData);
                 return false;
             }
@@ -328,9 +337,10 @@ namespace Engine
                 texture,
                 VK_IMAGE_TYPE_2D,
                 imageFormat,
-                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1
+                static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1,
+                mipLevels
             )) {
                 uploadBuffer.destroy();
                 stbi_image_free(pImageData);
@@ -417,6 +427,80 @@ namespace Engine
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     1, &imageCopy
                 );
+
+                // XXX: This mip calulcation only works for textures that are powers of 2
+                int32_t srcWidth = static_cast<int32_t>(texture.width);
+                int32_t srcHeight = static_cast<int32_t>(texture.height);
+                for (uint32_t level = 0; level < texture.levels - 1; level++)
+                {
+                    int32_t dstWidth = srcWidth / 2;
+                    int32_t dstHeight = srcHeight / 2;
+
+                    printf("Blit (%d x %d) -> (%d x %d)\n", srcWidth, srcHeight, dstWidth, dstHeight);
+
+                    VkImageMemoryBarrier srcMipBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+                    srcMipBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                    srcMipBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                    srcMipBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                    srcMipBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                    srcMipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    srcMipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    srcMipBarrier.image = texture.handle;
+                    srcMipBarrier.subresourceRange.baseMipLevel = level;
+                    srcMipBarrier.subresourceRange.levelCount = 1;
+                    srcMipBarrier.subresourceRange.baseArrayLayer = 0;
+                    srcMipBarrier.subresourceRange.layerCount = texture.depthOrLayers;
+                    srcMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+                    VkImageMemoryBarrier dstMipBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+                    dstMipBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                    dstMipBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                    dstMipBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                    dstMipBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                    dstMipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    dstMipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    dstMipBarrier.image = texture.handle;
+                    dstMipBarrier.subresourceRange.baseMipLevel = level + 1;
+                    dstMipBarrier.subresourceRange.levelCount = 1;
+                    dstMipBarrier.subresourceRange.baseArrayLayer = 0;
+                    dstMipBarrier.subresourceRange.layerCount = texture.depthOrLayers;
+                    dstMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+                    VkImageMemoryBarrier mipBarriers[] = { srcMipBarrier, dstMipBarrier, };
+                    vkCmdPipelineBarrier(uploadCommandBuffer,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        0,
+                        0, nullptr,
+                        0, nullptr,
+                        SIZEOF_ARRAY(mipBarriers), mipBarriers
+                    );
+
+                    VkImageBlit blitRegion{};
+                    blitRegion.srcOffsets[0] = VkOffset3D{ 0, 0, 0, };
+                    blitRegion.srcOffsets[1] = VkOffset3D{ srcWidth, srcHeight, 1, };
+                    blitRegion.srcSubresource.baseArrayLayer = 0;
+                    blitRegion.srcSubresource.layerCount = 1;
+                    blitRegion.srcSubresource.mipLevel = level;
+                    blitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                    blitRegion.dstOffsets[0] = VkOffset3D{ 0, 0, 0, };
+                    blitRegion.dstOffsets[1] = VkOffset3D{ dstWidth, dstHeight, 1, };
+                    blitRegion.dstSubresource.baseArrayLayer = 0;
+                    blitRegion.dstSubresource.layerCount = 1;
+                    blitRegion.dstSubresource.mipLevel = level + 1;
+                    blitRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+                    vkCmdBlitImage(
+                        uploadCommandBuffer,
+                        texture.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        texture.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        1, &blitRegion,
+                        VK_FILTER_LINEAR
+                    );
+
+                    srcWidth = dstWidth;
+                    srcHeight = dstHeight;
+                }
 
                 VkImageMemoryBarrier shaderBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
                 shaderBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
