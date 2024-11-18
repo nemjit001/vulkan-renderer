@@ -115,6 +115,9 @@ namespace Engine
     uint32_t framebufferWidth = 0;
     uint32_t framebufferHeight = 0;
 
+    // Frame command buffers
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+
     // Depth stencil target
     Texture depthStencilTexture{};
     VkImageView depthStencilView = VK_NULL_HANDLE;
@@ -144,7 +147,7 @@ namespace Engine
     Transform transform{};
     Mesh mesh{};
 
-    // Material data
+    // Mesh material data
     Texture colorTexture{};
     VkImageView colorTextureView;
     Texture normalTexture{};
@@ -349,25 +352,19 @@ namespace Engine
 
             // Schedule upload using transient upload buffer
             {
-                VkFenceCreateInfo fenceCreateInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
                 VkFence uploadFence = VK_NULL_HANDLE;
-                if (VK_FAILED(vkCreateFence(pDeviceContext->device, &fenceCreateInfo, nullptr, &uploadFence)))
+                if (!pDeviceContext->createFence(&uploadFence, false))
                 {
-                    vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
+                    pDeviceContext->destroyFence(uploadFence);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
                 }
 
-                VkCommandBufferAllocateInfo uploadBufAllocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-                uploadBufAllocInfo.commandPool = pDeviceContext->commandPool;
-                uploadBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-                uploadBufAllocInfo.commandBufferCount = 1;
-
                 VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
-                if (VK_FAILED(vkAllocateCommandBuffers(pDeviceContext->device, &uploadBufAllocInfo, &uploadCommandBuffer)))
+                if (!pDeviceContext->createCommandBuffer(&uploadCommandBuffer))
                 {
-                    vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
+                    pDeviceContext->destroyFence(uploadFence);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -379,8 +376,8 @@ namespace Engine
 
                 if (VK_FAILED(vkBeginCommandBuffer(uploadCommandBuffer, &uploadBeginInfo)))
                 {
-                    vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
-                    vkFreeCommandBuffers(pDeviceContext->device, pDeviceContext->commandPool, 1, &uploadCommandBuffer);
+                    pDeviceContext->destroyFence(uploadFence);
+                    pDeviceContext->destroyCommandBuffer(uploadCommandBuffer);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -436,7 +433,7 @@ namespace Engine
                     int32_t dstWidth = srcWidth / 2;
                     int32_t dstHeight = srcHeight / 2;
 
-                    printf("Blit (%d x %d) -> (%d x %d)\n", srcWidth, srcHeight, dstWidth, dstHeight);
+                    printf("Blit [%d] (%d x %d) -> (%d x %d)\n", level, srcWidth, srcHeight, dstWidth, dstHeight);
 
                     VkImageMemoryBarrier srcMipBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
                     srcMipBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -528,7 +525,7 @@ namespace Engine
                 if (VK_FAILED(vkEndCommandBuffer(uploadCommandBuffer)))
                 {
                     vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
-                    vkFreeCommandBuffers(pDeviceContext->device, pDeviceContext->commandPool, 1, &uploadCommandBuffer);
+                    pDeviceContext->destroyCommandBuffer(uploadCommandBuffer);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -546,15 +543,15 @@ namespace Engine
                 if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &uploadSubmit, uploadFence)))
                 {
                     vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
-                    vkFreeCommandBuffers(pDeviceContext->device, pDeviceContext->commandPool, 1, &uploadCommandBuffer);
+                    pDeviceContext->destroyCommandBuffer(uploadCommandBuffer);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
                 }
 
                 vkWaitForFences(pDeviceContext->device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
-                vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
-                vkFreeCommandBuffers(pDeviceContext->device, pDeviceContext->commandPool, 1, &uploadCommandBuffer);
+                pDeviceContext->destroyFence(uploadFence);
+                pDeviceContext->destroyCommandBuffer(uploadCommandBuffer);
             }
 
             uploadBuffer.destroy();
@@ -605,6 +602,15 @@ namespace Engine
 
         framebufferWidth = DefaultWindowWidth;
         framebufferHeight = DefaultWindowHeight;
+
+        // Create frame command buffers
+        {
+            if (!pDeviceContext->createCommandBuffer(&commandBuffer))
+            {
+                printf("VK Renderer command buffer create failed\n");
+                return false;
+            }
+        }
 
         // Create depth stencil target
         {
@@ -1234,6 +1240,8 @@ namespace Engine
         vkDestroyImageView(pDeviceContext->device, depthStencilView, nullptr);
         depthStencilTexture.destroy();
 
+        pDeviceContext->destroyCommandBuffer(commandBuffer);
+
         Renderer::destroyRenderDeviceContext(pDeviceContext);
         Renderer::shutdown();
 
@@ -1443,7 +1451,7 @@ namespace Engine
 
         uint32_t backbufferIndex = pDeviceContext->getCurrentBackbufferIndex();
         vkResetFences(pDeviceContext->device, 1, &pDeviceContext->directQueueIdle);
-        vkResetCommandBuffer(pDeviceContext->commandBuffer, 0 /* no flags */);
+        vkResetCommandBuffer(commandBuffer, 0 /* no flags */);
 
         // Record frame commands
         {
@@ -1451,7 +1459,7 @@ namespace Engine
             commandBeginInfo.flags = 0;
             commandBeginInfo.pInheritanceInfo = nullptr;
 
-            if (VK_FAILED(vkBeginCommandBuffer(pDeviceContext->commandBuffer, &commandBeginInfo)))
+            if (VK_FAILED(vkBeginCommandBuffer(commandBuffer, &commandBeginInfo)))
             {
                 printf("Vulkan command buffer begin failed\n");
                 isRunning = false;
@@ -1471,29 +1479,29 @@ namespace Engine
             renderPassBeginInfo.clearValueCount = SIZEOF_ARRAY(clearValues);
             renderPassBeginInfo.pClearValues = clearValues;
 
-            vkCmdBeginRenderPass(pDeviceContext->commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
             // Bind graphics pipeline
-            vkCmdSetViewport(pDeviceContext->commandBuffer, 0, 1, &viewport);
-            vkCmdSetScissor(pDeviceContext->commandBuffer, 0, 1, &scissor);
-            vkCmdBindPipeline(pDeviceContext->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
             // Bind descriptor sets
-            vkCmdBindDescriptorSets(pDeviceContext->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
             // Draw mesh
             VkBuffer vertexBuffers[] = { mesh.vertexBuffer.handle, };
             VkDeviceSize offsets[] = { 0, };
-            vkCmdBindVertexBuffers(pDeviceContext->commandBuffer, 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(pDeviceContext->commandBuffer, mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(pDeviceContext->commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
 
             // Draw GUI
-            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), pDeviceContext->commandBuffer);
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 
-            vkCmdEndRenderPass(pDeviceContext->commandBuffer);
+            vkCmdEndRenderPass(commandBuffer);
 
-            if (VK_FAILED(vkEndCommandBuffer(pDeviceContext->commandBuffer)))
+            if (VK_FAILED(vkEndCommandBuffer(commandBuffer)))
             {
                 printf("Vulkan command buffer end failed\n");
                 isRunning = false;
@@ -1511,7 +1519,7 @@ namespace Engine
         submitInfo.pWaitSemaphores = &pDeviceContext->swapAvailable;
         submitInfo.pWaitDstStageMask = waitStages;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &pDeviceContext->commandBuffer;
+        submitInfo.pCommandBuffers = &commandBuffer;
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &pDeviceContext->swapReleased;
 

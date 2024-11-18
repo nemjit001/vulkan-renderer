@@ -123,6 +123,14 @@ public:
 		VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
 	);
 
+	bool createCommandBuffer(VkCommandBuffer* pCommandBuffer);
+
+	void destroyCommandBuffer(VkCommandBuffer commandBuffer);
+
+	bool createFence(VkFence* pFence, bool signaled);
+
+	void destroyFence(VkFence fence);
+
 	/// @brief Get the swap chain image format.
 	/// @return 
 	VkFormat getSwapFormat() const;
@@ -163,22 +171,12 @@ public:
 	VkDevice device = VK_NULL_HANDLE;
 	VkQueue directQueue = VK_NULL_HANDLE;
 
-	//VkSwapchainCreateInfoKHR swapchainCreateInfo{};
-	//VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-	//std::vector<VkImage> swapImages{};
-	//std::vector<VkImageView> swapImageViews{};
-	//std::vector<Backbuffer> backbuffers;
-
-	// TODO(nemjit001): use fence based swap synchronization (same queue).
+	// TODO(nemjit001): move sync to API user side
 	VkSemaphore swapAvailable = VK_NULL_HANDLE;
+
+	// TODO(nemjit001): move command sync into a command context structure
 	VkSemaphore swapReleased = VK_NULL_HANDLE;
 	VkFence directQueueIdle = VK_NULL_HANDLE;
-
-	// TODO(nemjit001): move command buffer & command sync into a command context structure
-	VkCommandPool commandPool = VK_NULL_HANDLE;
-	VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-
-	// uint32_t backbufferIndex = 0;
 
 private:
 	VkSwapchainCreateInfoKHR m_swapchainCreateInfo{};
@@ -186,6 +184,8 @@ private:
 	std::vector<VkImage> m_swapImages{};
 	std::vector<VkImageView> m_swapImageViews{};
 	std::vector<Backbuffer> m_backbuffers;
+
+	VkCommandPool m_commandPool = VK_NULL_HANDLE;
 
 	uint32_t m_backbufferIndex = 0;
 };

@@ -173,19 +173,14 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
         }
     }
 
-    // Create synchronization primitives
+    // Create synchronization primitives for swap chain
     {
         VkSemaphoreCreateInfo semaphoreCreateInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
         semaphoreCreateInfo.flags = 0;
 
-        VkFenceCreateInfo fenceCreateInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-        if (VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapAvailable))
-            || VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapReleased))
-            || VK_FAILED(vkCreateFence(device, &fenceCreateInfo, nullptr, &directQueueIdle)))
+        if (VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapAvailable)))
         {
-            throw std::runtime_error("Vulkan sync primitive create failed");
+            throw std::runtime_error("Vulkan swap sync primitive create failed");
         }
     }
 
@@ -195,30 +190,28 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
         commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         commandPoolCreateInfo.queueFamilyIndex = directQueueFamily;
 
-        if (VK_FAILED(vkCreateCommandPool(device, &commandPoolCreateInfo, nullptr, &commandPool)))
+        if (VK_FAILED(vkCreateCommandPool(device, &commandPoolCreateInfo, nullptr, &m_commandPool)))
         {
             throw std::runtime_error("Vulkan command pool create failed");
         }
 
-        VkCommandBufferAllocateInfo commandBufAllocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-        commandBufAllocInfo.commandPool = commandPool;
-        commandBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        commandBufAllocInfo.commandBufferCount = 1;
+        VkSemaphoreCreateInfo semaphoreCreateInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+        semaphoreCreateInfo.flags = 0;
 
-        if (VK_FAILED(vkAllocateCommandBuffers(device, &commandBufAllocInfo, &commandBuffer)))
+        if (VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapReleased))
+            || !createFence(&directQueueIdle, true))
         {
-            throw std::runtime_error("Vulkan command buffer allocation failed\n");
+            throw std::runtime_error("Vulkan queue sync primitive create failed\n");
         }
     }
 }
 
 RenderDeviceContext::~RenderDeviceContext()
 {
-    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
-    vkDestroyCommandPool(device, commandPool, nullptr);
-
-    vkDestroyFence(device, directQueueIdle, nullptr);
+    destroyFence(directQueueIdle);
     vkDestroySemaphore(device, swapReleased, nullptr);
+    vkDestroyCommandPool(device, m_commandPool, nullptr);
+
     vkDestroySemaphore(device, swapAvailable, nullptr);
 
     for (auto& view : m_swapImageViews) {
@@ -273,9 +266,6 @@ bool RenderDeviceContext::present()
 
 bool RenderDeviceContext::resizeSwapResources(uint32_t width, uint32_t height)
 {
-    // Wait for previous frame
-    vkWaitForFences(device, 1, &directQueueIdle, VK_TRUE, UINT64_MAX);
-
     // Recreate swap chain & swap resources
     {
         m_backbuffers.clear();
@@ -463,6 +453,43 @@ bool RenderDeviceContext::createTexture(
     vkBindImageMemory(device, texture.handle, texture.memory, 0);
 
     return true;
+}
+
+bool RenderDeviceContext::createCommandBuffer(VkCommandBuffer* pCommandBuffer)
+{
+    VkCommandBufferAllocateInfo commandBufAllocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    commandBufAllocInfo.commandPool = m_commandPool;
+    commandBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    commandBufAllocInfo.commandBufferCount = 1;
+
+    if (VK_FAILED(vkAllocateCommandBuffers(device, &commandBufAllocInfo, pCommandBuffer)))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+void RenderDeviceContext::destroyCommandBuffer(VkCommandBuffer commandBuffer)
+{
+    vkFreeCommandBuffers(device, m_commandPool, 1, &commandBuffer);
+}
+
+bool RenderDeviceContext::createFence(VkFence* pFence, bool signaled)
+{
+    VkFenceCreateInfo fenceCreateInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    fenceCreateInfo.flags = signaled ? VK_FENCE_CREATE_SIGNALED_BIT : 0;
+
+    if (VK_FAILED(vkCreateFence(device, &fenceCreateInfo, nullptr, pFence))) {
+        return false;
+    }
+
+    return true;
+}
+
+void RenderDeviceContext::destroyFence(VkFence fence)
+{
+    vkDestroyFence(device, fence, nullptr);
 }
 
 VkFormat RenderDeviceContext::getSwapFormat() const
