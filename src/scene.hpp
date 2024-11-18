@@ -34,6 +34,7 @@ struct PerspectiveCamera
     float zFar = 100.0F;
 };
 
+/// @brief Virtual orthographic canera.
 struct OrthographicCamera
 {
     /// @brief Calculate the projection matrix for this camera.
@@ -46,12 +47,14 @@ struct OrthographicCamera
     float zFar = 100.0F;
 };
 
+/// @brief Camera type.
 enum class CameraType : uint8_t
 {
     Perspective = 0,
     Orthographic = 1,
 };
 
+/// @brief Camera tagged union, provides Virtual camera interface.
 struct Camera
 {
     /// @brief Calculate the projection matrix for this camera.
