@@ -115,7 +115,8 @@ namespace Engine
     uint32_t framebufferWidth = 0;
     uint32_t framebufferHeight = 0;
 
-    // Frame command buffers
+    // Frame command buffers w/ sync primitive
+    VkFence commandsFinished = VK_NULL_HANDLE;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
 
     // Depth stencil target
@@ -352,19 +353,9 @@ namespace Engine
 
             // Schedule upload using transient upload buffer
             {
-                VkFence uploadFence = VK_NULL_HANDLE;
-                if (!pDeviceContext->createFence(&uploadFence, false))
-                {
-                    pDeviceContext->destroyFence(uploadFence);
-                    uploadBuffer.destroy();
-                    stbi_image_free(pImageData);
-                    return false;
-                }
-
                 VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
                 if (!pDeviceContext->createCommandBuffer(&uploadCommandBuffer))
                 {
-                    pDeviceContext->destroyFence(uploadFence);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -376,7 +367,6 @@ namespace Engine
 
                 if (VK_FAILED(vkBeginCommandBuffer(uploadCommandBuffer, &uploadBeginInfo)))
                 {
-                    pDeviceContext->destroyFence(uploadFence);
                     pDeviceContext->destroyCommandBuffer(uploadCommandBuffer);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
@@ -524,8 +514,16 @@ namespace Engine
 
                 if (VK_FAILED(vkEndCommandBuffer(uploadCommandBuffer)))
                 {
-                    vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
                     pDeviceContext->destroyCommandBuffer(uploadCommandBuffer);
+                    uploadBuffer.destroy();
+                    stbi_image_free(pImageData);
+                    return false;
+                }
+
+                VkFence uploadFence = VK_NULL_HANDLE;
+                if (!pDeviceContext->createFence(&uploadFence, false))
+                {
+                    pDeviceContext->destroyFence(uploadFence);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -603,8 +601,14 @@ namespace Engine
         framebufferWidth = DefaultWindowWidth;
         framebufferHeight = DefaultWindowHeight;
 
-        // Create frame command buffers
+        // Create frame command buffers w/ sync
         {
+            if (!pDeviceContext->createFence(&commandsFinished, true))
+            {
+                printf("VK Renderer command sync primitive create failed\n");
+                return false;
+            }
+
             if (!pDeviceContext->createCommandBuffer(&commandBuffer))
             {
                 printf("VK Renderer command buffer create failed\n");
@@ -1209,7 +1213,7 @@ namespace Engine
     {
         printf("Shutting down Vulkan Renderer\n");
 
-        vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->directQueueIdle, VK_TRUE, UINT64_MAX);
+        vkWaitForFences(pDeviceContext->device, 1, &commandsFinished, VK_TRUE, UINT64_MAX);
 
         vkDestroyImageView(pDeviceContext->device, normalTextureView, nullptr);
         normalTexture.destroy();
@@ -1241,6 +1245,7 @@ namespace Engine
         depthStencilTexture.destroy();
 
         pDeviceContext->destroyCommandBuffer(commandBuffer);
+        pDeviceContext->destroyFence(commandsFinished);
 
         Renderer::destroyRenderDeviceContext(pDeviceContext);
         Renderer::shutdown();
@@ -1266,7 +1271,7 @@ namespace Engine
         framebufferWidth = static_cast<uint32_t>(width);
         framebufferHeight = static_cast<uint32_t>(height);
 
-        vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->directQueueIdle, VK_TRUE, UINT64_MAX);
+        vkWaitForFences(pDeviceContext->device, 1, &commandsFinished, VK_TRUE, UINT64_MAX);
 
         // Destroy swap dependent resources
         {
@@ -1443,14 +1448,14 @@ namespace Engine
     void render()
     {
         // Await & start new frame
-        vkWaitForFences(pDeviceContext->device, 1, &pDeviceContext->directQueueIdle, VK_TRUE, UINT64_MAX);
+        vkWaitForFences(pDeviceContext->device, 1, &commandsFinished, VK_TRUE, UINT64_MAX);
         if (!pDeviceContext->newFrame()) {
             resize();
             return;
         }
 
         uint32_t backbufferIndex = pDeviceContext->getCurrentBackbufferIndex();
-        vkResetFences(pDeviceContext->device, 1, &pDeviceContext->directQueueIdle);
+        vkResetFences(pDeviceContext->device, 1, &commandsFinished);
         vkResetCommandBuffer(commandBuffer, 0 /* no flags */);
 
         // Record frame commands
@@ -1523,7 +1528,7 @@ namespace Engine
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &pDeviceContext->swapReleased;
 
-        if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &submitInfo, pDeviceContext->directQueueIdle)))
+        if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &submitInfo, commandsFinished)))
         {
             printf("Vulkan queue submit failed\n");
             isRunning = false;

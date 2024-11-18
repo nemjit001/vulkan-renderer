@@ -173,10 +173,7 @@ public:
 
 	// TODO(nemjit001): move sync to API user side
 	VkSemaphore swapAvailable = VK_NULL_HANDLE;
-
-	// TODO(nemjit001): move command sync into a command context structure
 	VkSemaphore swapReleased = VK_NULL_HANDLE;
-	VkFence directQueueIdle = VK_NULL_HANDLE;
 
 private:
 	VkSwapchainCreateInfoKHR m_swapchainCreateInfo{};

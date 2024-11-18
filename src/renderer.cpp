@@ -178,7 +178,8 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
         VkSemaphoreCreateInfo semaphoreCreateInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
         semaphoreCreateInfo.flags = 0;
 
-        if (VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapAvailable)))
+        if (VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapAvailable))
+            || VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapReleased)))
         {
             throw std::runtime_error("Vulkan swap sync primitive create failed");
         }
@@ -194,21 +195,11 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
         {
             throw std::runtime_error("Vulkan command pool create failed");
         }
-
-        VkSemaphoreCreateInfo semaphoreCreateInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-        semaphoreCreateInfo.flags = 0;
-
-        if (VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapReleased))
-            || !createFence(&directQueueIdle, true))
-        {
-            throw std::runtime_error("Vulkan queue sync primitive create failed\n");
-        }
     }
 }
 
 RenderDeviceContext::~RenderDeviceContext()
 {
-    destroyFence(directQueueIdle);
     vkDestroySemaphore(device, swapReleased, nullptr);
     vkDestroyCommandPool(device, m_commandPool, nullptr);
 
