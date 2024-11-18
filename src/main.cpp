@@ -14,29 +14,12 @@
 
 #include "assets.hpp"
 #include "math.hpp"
-#include "mesh.hpp"
+#include "object.hpp"
 #include "renderer.hpp"
 #include "timer.hpp"
 
 namespace Engine
 {
-    /// @brief Simple TRS transform.
-    struct Transform
-    {
-        /// @brief Calculate the transformation matrix for this transform.
-        /// @return 
-        glm::mat4 matrix() const
-        {
-            return glm::translate(glm::identity<glm::mat4>(), position)
-                * glm::mat4_cast(rotation)
-                * glm::scale(glm::identity<glm::mat4>(), scale);
-        }
-
-        glm::vec3 position = glm::vec3(0.0F);
-        glm::quat rotation = glm::quat(1.0F, 0.0F, 0.0F, 0.0F);
-        glm::vec3 scale = glm::vec3(1.0F);
-    };
-
     /// @brief Virtual camera.
     struct Camera
     {
@@ -67,14 +50,6 @@ namespace Engine
         alignas(16) glm::vec3 ambientLight;
         alignas(16) glm::vec3 cameraPosition;
         alignas(16) glm::mat4 viewproject;
-    };
-
-    /// @brief Uniform per-object data.
-    struct UniformObjectData
-    {
-        alignas(16) glm::mat4 model;
-        alignas(16) glm::mat4 normal;
-        alignas(4)  float specularity;
     };
 
     constexpr char const* pWindowTitle = "Vulkan Renderer";
@@ -122,23 +97,15 @@ namespace Engine
     Camera camera{};
 
     // Object data
-    VkDescriptorSet objectDataSet = VK_NULL_HANDLE;
-    Buffer objectDataBuffer{};
-    Transform transform{};
-    Texture colorTexture{};
-    VkImageView colorTextureView;
-    Texture normalTexture{};
-    VkImageView normalTextureView;
-    Mesh mesh{};
+    std::vector<Mesh> meshes{};
+    std::vector<Texture> textures{};
+    std::vector<Object> objects{};
 
     // CPU side render data
     float sunAzimuth = 0.0F;
     float sunZenith = 0.0F;
     glm::vec3 sunColor = glm::vec3(1.0F);
     glm::vec3 ambientLight = glm::vec3(0.1F);
-    float specularity = 0.5F;
-    UniformSceneData sceneData{};
-    UniformObjectData objectData{};
 
     bool init()
     {
@@ -705,7 +672,6 @@ namespace Engine
             camera.position = glm::vec3(0.0F, 0.0F, -5.0F);
             camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
             camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
-            transform = Transform{};
 
             if (!pDeviceContext->createBuffer(sceneDataBuffer, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
             {
@@ -736,119 +702,31 @@ namespace Engine
             objectDataSetAllocInfo.descriptorSetCount = 1;
             objectDataSetAllocInfo.pSetLayouts = &objectDataSetLayout;
 
+            VkDescriptorSet objectDataSet = VK_NULL_HANDLE;
             if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &objectDataSetAllocInfo, &objectDataSet)))
             {
                 printf("Vulkan descriptor set allocation failed\n");
                 return false;
             }
-
-            if (!pDeviceContext->createBuffer(objectDataBuffer, sizeof(UniformObjectData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
-            {
-                printf("Vulkan object data buffer create failed\n");
-                return false;
-            }
-
-            if (!loadTexture(pDeviceContext, "data/assets/brickwall.jpg", colorTexture))
-            {
-                printf("Vulkan color texture create failed\n");
-                return false;
-            }
-
-            if (!loadTexture(pDeviceContext, "data/assets/brickwall_normal.jpg", normalTexture))
-            {
-                printf("Vulkan normal texture create failed\n");
-                return false;
-            }
-
-            VkImageViewCreateInfo colorTextureViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-            colorTextureViewCreateInfo.flags = 0;
-            colorTextureViewCreateInfo.image = colorTexture.handle;
-            colorTextureViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            colorTextureViewCreateInfo.format = colorTexture.format;
-            colorTextureViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-            colorTextureViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-            colorTextureViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-            colorTextureViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-            colorTextureViewCreateInfo.subresourceRange.baseMipLevel = 0;
-            colorTextureViewCreateInfo.subresourceRange.levelCount = colorTexture.levels;
-            colorTextureViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-            colorTextureViewCreateInfo.subresourceRange.layerCount = colorTexture.depthOrLayers;
-            colorTextureViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-            if (VK_FAILED(vkCreateImageView(pDeviceContext->device, &colorTextureViewCreateInfo, nullptr, &colorTextureView)))
-            {
-                printf("Vulkan color texture view create failed\n");
-                return false;
-            }
-
-            VkImageViewCreateInfo normalTextureViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-            normalTextureViewCreateInfo.flags = 0;
-            normalTextureViewCreateInfo.image = normalTexture.handle;
-            normalTextureViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            normalTextureViewCreateInfo.format = normalTexture.format;
-            normalTextureViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-            normalTextureViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-            normalTextureViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-            normalTextureViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-            normalTextureViewCreateInfo.subresourceRange.baseMipLevel = 0;
-            normalTextureViewCreateInfo.subresourceRange.levelCount = normalTexture.levels;
-            normalTextureViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-            normalTextureViewCreateInfo.subresourceRange.layerCount = normalTexture.depthOrLayers;
-            normalTextureViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-            if (VK_FAILED(vkCreateImageView(pDeviceContext->device, &normalTextureViewCreateInfo, nullptr, &normalTextureView)))
-            {
-                printf("Vulkan color texture view create failed\n");
-                return false;
-            }
-
+            
+            Mesh mesh{};
             if (!loadOBJ(pDeviceContext, "data/assets/suzanne.obj", mesh))
             {
-                printf("VK Renderer mesh load failed\n");
-                return false;
+                throw std::runtime_error("VK Renderer mesh load failed");
             }
 
-            VkDescriptorBufferInfo objectDataBufferInfo{};
-            objectDataBufferInfo.buffer = objectDataBuffer.handle;
-            objectDataBufferInfo.offset = 0;
-            objectDataBufferInfo.range = objectDataBuffer.size;
+            Texture colorTexture{};
+            Texture normalTexture{};
+            if (!loadTexture(pDeviceContext, "data/assets/brickwall.jpg", colorTexture)
+                || !loadTexture(pDeviceContext, "data/assets/brickwall_normal.jpg", normalTexture))
+            {
+                throw std::runtime_error("VK Renderer texture loading failed");
+            }
 
-            VkDescriptorImageInfo colorTextureInfo{};
-            colorTextureInfo.sampler = VK_NULL_HANDLE;
-            colorTextureInfo.imageView = colorTextureView;
-            colorTextureInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-            VkDescriptorImageInfo normalTextureInfo{};
-            normalTextureInfo.sampler = VK_NULL_HANDLE;
-            normalTextureInfo.imageView = normalTextureView;
-            normalTextureInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-            VkWriteDescriptorSet objectDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            objectDataWrite.dstSet = objectDataSet;
-            objectDataWrite.dstBinding = 0;
-            objectDataWrite.dstArrayElement = 0;
-            objectDataWrite.descriptorCount = 1;
-            objectDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            objectDataWrite.pBufferInfo = &objectDataBufferInfo;
-
-            VkWriteDescriptorSet colorTextureWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            colorTextureWrite.dstSet = objectDataSet;
-            colorTextureWrite.dstBinding = 1;
-            colorTextureWrite.dstArrayElement = 0;
-            colorTextureWrite.descriptorCount = 1;
-            colorTextureWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            colorTextureWrite.pImageInfo = &colorTextureInfo;
-
-            VkWriteDescriptorSet normalTextureWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            normalTextureWrite.dstSet = objectDataSet;
-            normalTextureWrite.dstBinding = 2;
-            normalTextureWrite.dstArrayElement = 0;
-            normalTextureWrite.descriptorCount = 1;
-            normalTextureWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            normalTextureWrite.pImageInfo = &normalTextureInfo;
-
-            VkWriteDescriptorSet objectDescriptorWrites[] = { objectDataWrite, colorTextureWrite, normalTextureWrite, };
-            vkUpdateDescriptorSets(pDeviceContext->device, SIZEOF_ARRAY(objectDescriptorWrites), objectDescriptorWrites, 0, nullptr);
+            meshes.push_back(mesh);
+            textures.push_back(colorTexture);
+            textures.push_back(normalTexture);
+            objects.push_back(Object(pDeviceContext, objectDataSet, mesh, colorTexture, normalTexture));
         }
 
         printf("Initialized Vulkan Renderer\n");
@@ -863,12 +741,17 @@ namespace Engine
         vkWaitForFences(pDeviceContext->device, 1, &commandsFinished, VK_TRUE, UINT64_MAX);
 
         // Destroy per-object data
-        mesh.destroy();
-        vkDestroyImageView(pDeviceContext->device, normalTextureView, nullptr);
-        normalTexture.destroy();
-        vkDestroyImageView(pDeviceContext->device, colorTextureView, nullptr);
-        colorTexture.destroy();
-        objectDataBuffer.destroy();     
+        for (auto& object : objects) {
+            object.destroy();
+        }
+
+        for (auto& texture : textures) {
+            texture.destroy();
+        }
+
+        for (auto& mesh : meshes) {
+            mesh.destroy();
+        }
 
         // Destroy per-scene data
         sceneDataBuffer.destroy();
@@ -1068,21 +951,18 @@ namespace Engine
             ImGui::ColorEdit3("Sun Color", &sunColor[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
             ImGui::ColorEdit3("Ambient Light", &ambientLight[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
 
-            ImGui::SeparatorText("Material");
-            ImGui::DragFloat("Specularity", &specularity, 0.01F, 0.0F, 1.0F);
+            // ImGui::SeparatorText("Object data");
+            // ImGui::DragFloat("Specularity", &pObject->specularity, 0.01F, 0.0F, 1.0F);
         }
         ImGui::End();
 
         ImGui::Render();
 
-        // Update camera data
+        // Update scene data
         camera.position = glm::vec3(2.0F, 2.0F, -5.0F);
         camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
 
-        // Update transform data
-        transform.rotation = glm::rotate(transform.rotation, (float)frameTimer.deltaTimeMS() / 1000.0F, glm::vec3(0.0F, 1.0F, 0.0F));
-
-        // Update scene data
+        UniformSceneData sceneData{};
         sceneData.sunDirection = glm::normalize(glm::vec3{
             glm::cos(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
             glm::cos(glm::radians(90.0F - sunZenith)),
@@ -1093,17 +973,15 @@ namespace Engine
         sceneData.cameraPosition = glm::vec3(0.0F, 0.0F, -5.0F);
         sceneData.viewproject = camera.matrix();
 
-        // Update object data
-        objectData.model = transform.matrix();
-        objectData.normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(objectData.model))));
-        objectData.specularity = specularity;
-
-        // Update uniform buffers
         assert(sceneDataBuffer.mapped);
         memcpy(sceneDataBuffer.pData, &sceneData, sizeof(UniformSceneData));
 
-        assert(objectDataBuffer.mapped);
-        memcpy(objectDataBuffer.pData, &objectData, sizeof(UniformObjectData));
+        // Update object data
+        for (auto& object : objects)
+        {
+            object.transform.rotation = glm::rotate(object.transform.rotation, (float)frameTimer.deltaTimeMS() / 1000.0F, glm::vec3(0.0F, 1.0F, 0.0F));
+            object.update();
+        }
     }
 
     void render()
@@ -1152,16 +1030,22 @@ namespace Engine
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-            // Bind descriptor sets
+            // Bind scene descriptor set
             vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &sceneDataSet, 0, nullptr);
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &objectDataSet, 0, nullptr);
 
-            // Draw mesh
-            VkBuffer vertexBuffers[] = { mesh.vertexBuffer.handle, };
-            VkDeviceSize offsets[] = { 0, };
-            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+            // Render objects in scene
+            for (auto& object : objects)
+            {
+                // Bind object descriptor set
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &object.objectDataSet, 0, nullptr);
+
+                // Draw object mesh
+                VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
+                VkDeviceSize offsets[] = { 0, };
+                vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
+            }
 
             // Draw GUI
             ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
