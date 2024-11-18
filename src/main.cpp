@@ -354,7 +354,7 @@ namespace Engine
             // Schedule upload using transient upload buffer
             {
                 VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
-                if (!pDeviceContext->createCommandBuffer(&uploadCommandBuffer))
+                if (!pDeviceContext->createCommandBuffer(CommandQueueType::Copy, &uploadCommandBuffer))
                 {
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
@@ -367,7 +367,7 @@ namespace Engine
 
                 if (VK_FAILED(vkBeginCommandBuffer(uploadCommandBuffer, &uploadBeginInfo)))
                 {
-                    pDeviceContext->destroyCommandBuffer(uploadCommandBuffer);
+                    pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -514,7 +514,7 @@ namespace Engine
 
                 if (VK_FAILED(vkEndCommandBuffer(uploadCommandBuffer)))
                 {
-                    pDeviceContext->destroyCommandBuffer(uploadCommandBuffer);
+                    pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -541,7 +541,7 @@ namespace Engine
                 if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &uploadSubmit, uploadFence)))
                 {
                     vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
-                    pDeviceContext->destroyCommandBuffer(uploadCommandBuffer);
+                    pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
                     uploadBuffer.destroy();
                     stbi_image_free(pImageData);
                     return false;
@@ -549,7 +549,7 @@ namespace Engine
 
                 vkWaitForFences(pDeviceContext->device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
                 pDeviceContext->destroyFence(uploadFence);
-                pDeviceContext->destroyCommandBuffer(uploadCommandBuffer);
+                pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
             }
 
             uploadBuffer.destroy();
@@ -609,7 +609,7 @@ namespace Engine
                 return false;
             }
 
-            if (!pDeviceContext->createCommandBuffer(&commandBuffer))
+            if (!pDeviceContext->createCommandBuffer(CommandQueueType::Direct, &commandBuffer))
             {
                 printf("VK Renderer command buffer create failed\n");
                 return false;
@@ -1244,7 +1244,7 @@ namespace Engine
         vkDestroyImageView(pDeviceContext->device, depthStencilView, nullptr);
         depthStencilTexture.destroy();
 
-        pDeviceContext->destroyCommandBuffer(commandBuffer);
+        pDeviceContext->destroyCommandBuffer(CommandQueueType::Direct, commandBuffer);
         pDeviceContext->destroyFence(commandsFinished);
 
         Renderer::destroyRenderDeviceContext(pDeviceContext);
@@ -1401,6 +1401,7 @@ namespace Engine
             ImGui::Text("Frame time: %10.2f ms", frameTimer.deltaTimeMS());
             ImGui::Text("FPS:        %10.2f fps", 1'000.0 / frameTimer.deltaTimeMS());
 
+            // TODO(nemjit001): implement this
             ImGui::SeparatorText("Settings");
             ImGui::RadioButton("VSync Enabled", true);
             ImGui::RadioButton("VSync Disabled", false);

@@ -9,6 +9,12 @@
 #define SIZEOF_ARRAY(val)   (sizeof((val)) / sizeof((val)[0]))
 #define VK_FAILED(expr)     ((expr) != VK_SUCCESS)
 
+enum class CommandQueueType : uint8_t
+{
+	Direct = 0x01,
+	Copy = 0x02,
+};
+
 /// @brief Swap chain backbuffer.
 struct Backbuffer
 {
@@ -123,12 +129,25 @@ public:
 		VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
 	);
 
-	bool createCommandBuffer(VkCommandBuffer* pCommandBuffer);
+	/// @brief Create a command buffer for use on a specific queue.
+	/// @param queue Target command queue for the command buffer.
+	/// @param pCommandBuffer 
+	/// @return A boolean indicating successful creation.
+	bool createCommandBuffer(CommandQueueType queue, VkCommandBuffer* pCommandBuffer);
 
-	void destroyCommandBuffer(VkCommandBuffer commandBuffer);
+	/// @brief Destroy a command buffer.
+	/// @param queue Target queue used for creation.
+	/// @param commandBuffer Command buffer to destroy.
+	void destroyCommandBuffer(CommandQueueType queue, VkCommandBuffer commandBuffer);
 
+	/// @brief Create a synchronization fence.
+	/// @param pFence 
+	/// @param signaled Create fence in the signaled state.
+	/// @return A boolean indicating successful creation.
 	bool createFence(VkFence* pFence, bool signaled);
 
+	/// @brief Destroy a fence.
+	/// @param fence 
 	void destroyFence(VkFence fence);
 
 	/// @brief Get the swap chain image format.
@@ -182,7 +201,8 @@ private:
 	std::vector<VkImageView> m_swapImageViews{};
 	std::vector<Backbuffer> m_backbuffers;
 
-	VkCommandPool m_commandPool = VK_NULL_HANDLE;
+	VkCommandPool m_directCommandPool = VK_NULL_HANDLE;
+	VkCommandPool m_transferCommandPool = VK_NULL_HANDLE;
 
 	uint32_t m_backbufferIndex = 0;
 };

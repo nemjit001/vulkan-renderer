@@ -187,13 +187,22 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
 
     // Create command pool & command buffer
     {
-        VkCommandPoolCreateInfo commandPoolCreateInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
-        commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        commandPoolCreateInfo.queueFamilyIndex = directQueueFamily;
+        VkCommandPoolCreateInfo directCommandPoolCreateInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+        directCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        directCommandPoolCreateInfo.queueFamilyIndex = directQueueFamily;
 
-        if (VK_FAILED(vkCreateCommandPool(device, &commandPoolCreateInfo, nullptr, &m_commandPool)))
+        if (VK_FAILED(vkCreateCommandPool(device, &directCommandPoolCreateInfo, nullptr, &m_directCommandPool)))
         {
-            throw std::runtime_error("Vulkan command pool create failed");
+            throw std::runtime_error("Vulkan direct command pool create failed");
+        }
+
+        VkCommandPoolCreateInfo transferCommandPoolCreateInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+        transferCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+        transferCommandPoolCreateInfo.queueFamilyIndex = directQueueFamily;
+
+        if (VK_FAILED(vkCreateCommandPool(device, &transferCommandPoolCreateInfo, nullptr, &m_transferCommandPool)))
+        {
+            throw std::runtime_error("Vulkan transfer command pool create failed");
         }
     }
 }
@@ -201,7 +210,8 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
 RenderDeviceContext::~RenderDeviceContext()
 {
     vkDestroySemaphore(device, swapReleased, nullptr);
-    vkDestroyCommandPool(device, m_commandPool, nullptr);
+    vkDestroyCommandPool(device, m_transferCommandPool, nullptr);
+    vkDestroyCommandPool(device, m_directCommandPool, nullptr);
 
     vkDestroySemaphore(device, swapAvailable, nullptr);
 
@@ -446,10 +456,23 @@ bool RenderDeviceContext::createTexture(
     return true;
 }
 
-bool RenderDeviceContext::createCommandBuffer(VkCommandBuffer* pCommandBuffer)
+bool RenderDeviceContext::createCommandBuffer(CommandQueueType queue, VkCommandBuffer* pCommandBuffer)
 {
+    VkCommandPool pool = m_directCommandPool;
+    switch (queue)
+    {
+    case CommandQueueType::Direct:
+        pool = m_directCommandPool;
+        break;
+    case CommandQueueType::Copy:
+        pool = m_transferCommandPool;
+        break;
+    default:
+        break;
+    }
+
     VkCommandBufferAllocateInfo commandBufAllocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-    commandBufAllocInfo.commandPool = m_commandPool;
+    commandBufAllocInfo.commandPool = pool;
     commandBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     commandBufAllocInfo.commandBufferCount = 1;
 
@@ -461,9 +484,22 @@ bool RenderDeviceContext::createCommandBuffer(VkCommandBuffer* pCommandBuffer)
     return true;
 }
 
-void RenderDeviceContext::destroyCommandBuffer(VkCommandBuffer commandBuffer)
+void RenderDeviceContext::destroyCommandBuffer(CommandQueueType queue, VkCommandBuffer commandBuffer)
 {
-    vkFreeCommandBuffers(device, m_commandPool, 1, &commandBuffer);
+    VkCommandPool pool = m_directCommandPool;
+    switch (queue)
+    {
+    case CommandQueueType::Direct:
+        pool = m_directCommandPool;
+        break;
+    case CommandQueueType::Copy:
+        pool = m_transferCommandPool;
+        break;
+    default:
+        break;
+    }
+
+    vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
 }
 
 bool RenderDeviceContext::createFence(VkFence* pFence, bool signaled)
