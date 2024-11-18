@@ -27,6 +27,8 @@ namespace Engine
     bool isRunning = true;
     SDL_Window* pWindow = nullptr;
     Timer frameTimer{};
+    Timer cpuUpdateTimer{};
+    Timer cpuRenderTimer{};
     RenderDeviceContext* pDeviceContext = nullptr;
     uint32_t framebufferWidth = 0;
     uint32_t framebufferHeight = 0;
@@ -863,6 +865,7 @@ namespace Engine
     {
         // Tick frame timer
         frameTimer.tick();
+        cpuUpdateTimer.reset();
 
         // Update window state
         SDL_Event event{};
@@ -890,7 +893,21 @@ namespace Engine
             }
         }
 
-        // Record GUI state
+        // Update scene data
+        scene.camera.position = glm::vec3(0.0F, 2.0F, -5.0F);
+        scene.camera.forward = glm::normalize(glm::vec3(0.0F) - scene.camera.position);
+        scene.update();
+
+        cpuUpdateTimer.tick();
+
+        // Record GUI state (not part of CPU update)
+        static RunningAverage avgFrameTime(25);
+        static RunningAverage avgCpuUpdate(25);
+        static RunningAverage avgCpuRender(25);
+        avgFrameTime.update(frameTimer.deltaTimeMS());
+        avgCpuUpdate.update(cpuUpdateTimer.deltaTimeMS());
+        avgCpuRender.update(cpuRenderTimer.deltaTimeMS());
+
         ImGui_ImplSDL2_NewFrame();
         ImGui_ImplVulkan_NewFrame();
         ImGui::NewFrame();
@@ -898,9 +915,11 @@ namespace Engine
         if (ImGui::Begin("Vulkan Renderer Config"))
         {
             ImGui::SeparatorText("Statistics");
-            ImGui::Text("Framebuffer size: (%u, %u)", framebufferWidth, framebufferHeight);
-            ImGui::Text("Frame time: %10.2f ms", frameTimer.deltaTimeMS());
-            ImGui::Text("FPS:        %10.2f fps", 1'000.0 / frameTimer.deltaTimeMS());
+            ImGui::Text("Framebuffer size:    (%u, %u)", framebufferWidth, framebufferHeight);
+            ImGui::Text("Frame time:          %10.2f ms", avgFrameTime.getAverage());
+            ImGui::Text("- CPU update:        %10.2f ms", avgCpuUpdate.getAverage());
+            ImGui::Text("- Command recording: %10.2f ms", avgCpuRender.getAverage());
+            ImGui::Text("FPS:                 %10.2f fps", 1'000.0 / avgFrameTime.getAverage());
 
             // TODO(nemjit001): implement this
             ImGui::SeparatorText("Settings");
@@ -914,17 +933,13 @@ namespace Engine
             ImGui::ColorEdit3("Sun Color", &scene.sunColor[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
             ImGui::ColorEdit3("Ambient Light", &scene.ambientLight[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
 
+            // TODO(nemjit001): Implement per-object data editing
             // ImGui::SeparatorText("Object data");
             // ImGui::DragFloat("Specularity", &pObject->specularity, 0.01F, 0.0F, 1.0F);
         }
         ImGui::End();
 
         ImGui::Render();
-
-        // Update scene data
-        scene.camera.position = glm::vec3(0.0F, 2.0F, -5.0F);
-        scene.camera.forward = glm::normalize(glm::vec3(0.0F) - scene.camera.position);
-        scene.update();
     }
 
     void render()
@@ -942,6 +957,9 @@ namespace Engine
 
         // Record frame commands
         {
+            // Reset render timer
+            cpuRenderTimer.reset();
+
             VkCommandBufferBeginInfo commandBeginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
             commandBeginInfo.flags = 0;
             commandBeginInfo.pInheritanceInfo = nullptr;
@@ -1001,6 +1019,8 @@ namespace Engine
                 isRunning = false;
                 return;
             }
+
+            cpuRenderTimer.tick();
         }
 
         // Submit recorded commands

@@ -22,3 +22,18 @@ private:
 	TimePoint m_current = m_start;
 	TimePoint m_last = m_current;
 };
+
+class RunningAverage
+{
+public:
+	RunningAverage(uint32_t valueCount);
+
+	void update(double value);
+
+	double getAverage() const;
+
+private:
+	double m_alpha = 0.0;
+	double m_invAlpha = 0.0;
+	double m_average = 0.0;
+};
