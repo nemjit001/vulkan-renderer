@@ -859,8 +859,10 @@ namespace Engine
     {
         printf("Shutting down Vulkan Renderer\n");
 
+        // Wait for the last frame.
         vkWaitForFences(pDeviceContext->device, 1, &commandsFinished, VK_TRUE, UINT64_MAX);
 
+        // Destroy per-object data
         mesh.destroy();
         vkDestroyImageView(pDeviceContext->device, normalTextureView, nullptr);
         normalTexture.destroy();
@@ -868,29 +870,35 @@ namespace Engine
         colorTexture.destroy();
         objectDataBuffer.destroy();     
 
+        // Destroy per-scene data
         sceneDataBuffer.destroy();
 
+        // Destroy descriptor pools
         vkDestroyDescriptorPool(pDeviceContext->device, objectDescriptorPool, nullptr);
         vkDestroyDescriptorPool(pDeviceContext->device, sceneDescriptorPool, nullptr);
 
+        // Destroy graphics pipeline & associated data
         vkDestroyPipeline(pDeviceContext->device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(pDeviceContext->device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(pDeviceContext->device, objectDataSetLayout, nullptr);
         vkDestroyDescriptorSetLayout(pDeviceContext->device, sceneDataSetLayout, nullptr);
         vkDestroySampler(pDeviceContext->device, textureSampler, nullptr);
 
+        // Destroy GUI data
         ImGui_ImplVulkan_Shutdown();
         vkDestroyDescriptorPool(pDeviceContext->device, imguiDescriptorPool, nullptr);
 
+        // Destroy framebuffers & render pass
         for (auto& framebuffer : framebuffers) {
             vkDestroyFramebuffer(pDeviceContext->device, framebuffer, nullptr);
         }
-
         vkDestroyRenderPass(pDeviceContext->device, renderPass, nullptr);
 
+        // Destroy render targets
         vkDestroyImageView(pDeviceContext->device, depthStencilView, nullptr);
         depthStencilTexture.destroy();
 
+        // Destroy command buffer & sync primitive
         pDeviceContext->destroyCommandBuffer(CommandQueueType::Direct, commandBuffer);
         pDeviceContext->destroyFence(commandsFinished);
 

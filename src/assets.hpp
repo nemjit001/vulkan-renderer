@@ -18,7 +18,7 @@ bool readShaderFile(char const* path, std::vector<uint32_t>& shaderCode);
 /// @return A boolean indicating success.
 bool loadOBJ(RenderDeviceContext* pDeviceContext, char const* path, Mesh& mesh);
 
-/// @brief Load a texture from disk.
+/// @brief Load a texture from disk, mipmaps are generated automatically on load.
 /// @param pDeviceContext Device context to use for texture loading.
 /// @param path 
 /// @param texture 
