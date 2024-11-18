@@ -24,11 +24,18 @@ struct UniformObjectData
     alignas(4)  float specularity;
 };
 
+/// @brief Renderable object.
 class Object
 {
 public:
     Object() = default;
 
+    /// @brief Create a new object.
+    /// @param pDeviceContext Device context pointer.
+    /// @param objectDataSet Object data descriptor set, preallocated.
+    /// @param mesh Mesh struct, externally managed.
+    /// @param colorTexture Color texture, externally managed.
+    /// @param normalTexture Normal texture, externally managed.
     Object(
         RenderDeviceContext* pDeviceContext,
         VkDescriptorSet objectDataSet,
@@ -37,8 +44,10 @@ public:
         Texture normalTexture
     );
 
+    /// @brief Destroy the object.
     void destroy();
 
+    /// @brief Update the object, uploading data to the GPU.
     void update();
 
 public:
