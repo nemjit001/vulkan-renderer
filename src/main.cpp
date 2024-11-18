@@ -95,10 +95,9 @@ namespace Engine
     VkDescriptorSet sceneDataSet = VK_NULL_HANDLE;
     Buffer sceneDataBuffer{};
     Camera camera{};
-
-    // Object data
     std::vector<Mesh> meshes{};
     std::vector<Texture> textures{};
+    std::vector<VkImageView> textureViews{};
     std::vector<Object> objects{};
 
     // CPU side render data
@@ -639,13 +638,13 @@ namespace Engine
             }
 
             VkDescriptorPoolSize objectPoolSizes[] = {
-                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
-                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
+                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 },
+                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
             };
 
             VkDescriptorPoolCreateInfo objectDescriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
             objectDescriptorPoolCreateInfo.flags = 0;
-            objectDescriptorPoolCreateInfo.maxSets = 1;
+            objectDescriptorPoolCreateInfo.maxSets = 2;
             objectDescriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(objectPoolSizes);
             objectDescriptorPoolCreateInfo.pPoolSizes = objectPoolSizes;
 
@@ -695,22 +694,16 @@ namespace Engine
             vkUpdateDescriptorSets(pDeviceContext->device, 1, &sceneDataWrite, 0, nullptr);
         }
 
-        // Set up object data
-        {
-            VkDescriptorSetAllocateInfo objectDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-            objectDataSetAllocInfo.descriptorPool = objectDescriptorPool;
-            objectDataSetAllocInfo.descriptorSetCount = 1;
-            objectDataSetAllocInfo.pSetLayouts = &objectDataSetLayout;
-
-            VkDescriptorSet objectDataSet = VK_NULL_HANDLE;
-            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &objectDataSetAllocInfo, &objectDataSet)))
+        // Set up scene object data
+        {            
+            Mesh suzanneMesh{};
+            if (!loadOBJ(pDeviceContext, "data/assets/suzanne.obj", suzanneMesh))
             {
-                printf("Vulkan descriptor set allocation failed\n");
-                return false;
+                throw std::runtime_error("VK Renderer mesh load failed");
             }
-            
-            Mesh mesh{};
-            if (!loadOBJ(pDeviceContext, "data/assets/suzanne.obj", mesh))
+
+            Mesh cubeMesh{};
+            if (!loadOBJ(pDeviceContext, "data/assets/cube.obj", cubeMesh))
             {
                 throw std::runtime_error("VK Renderer mesh load failed");
             }
@@ -723,10 +716,77 @@ namespace Engine
                 throw std::runtime_error("VK Renderer texture loading failed");
             }
 
-            meshes.push_back(mesh);
+            VkImageViewCreateInfo colorTextureViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+            colorTextureViewCreateInfo.flags = 0;
+            colorTextureViewCreateInfo.image = colorTexture.handle;
+            colorTextureViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            colorTextureViewCreateInfo.format = colorTexture.format;
+            colorTextureViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+            colorTextureViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+            colorTextureViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+            colorTextureViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+            colorTextureViewCreateInfo.subresourceRange.baseMipLevel = 0;
+            colorTextureViewCreateInfo.subresourceRange.levelCount = colorTexture.levels;
+            colorTextureViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+            colorTextureViewCreateInfo.subresourceRange.layerCount = colorTexture.depthOrLayers;
+            colorTextureViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+            VkImageViewCreateInfo normalTextureViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+            normalTextureViewCreateInfo.flags = 0;
+            normalTextureViewCreateInfo.image = normalTexture.handle;
+            normalTextureViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            normalTextureViewCreateInfo.format = normalTexture.format;
+            normalTextureViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+            normalTextureViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+            normalTextureViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+            normalTextureViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+            normalTextureViewCreateInfo.subresourceRange.baseMipLevel = 0;
+            normalTextureViewCreateInfo.subresourceRange.levelCount = normalTexture.levels;
+            normalTextureViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+            normalTextureViewCreateInfo.subresourceRange.layerCount = normalTexture.depthOrLayers;
+            normalTextureViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+            VkImageView colorTextureView = VK_NULL_HANDLE;
+            VkImageView normalTextureView = VK_NULL_HANDLE;
+            if (VK_FAILED(vkCreateImageView(pDeviceContext->device, &colorTextureViewCreateInfo, nullptr, &colorTextureView))
+                || VK_FAILED(vkCreateImageView(pDeviceContext->device, &normalTextureViewCreateInfo, nullptr, &normalTextureView)))
+            {
+                throw std::runtime_error("VK Renderer texture view create failed");
+            }
+
+            VkDescriptorSetAllocateInfo objectDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+            objectDataSetAllocInfo.descriptorPool = objectDescriptorPool;
+            objectDataSetAllocInfo.descriptorSetCount = 1;
+            objectDataSetAllocInfo.pSetLayouts = &objectDataSetLayout;
+
+            VkDescriptorSet suzanneDataSet = VK_NULL_HANDLE;
+            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &objectDataSetAllocInfo, &suzanneDataSet)))
+            {
+                printf("Vulkan descriptor set allocation failed\n");
+                return false;
+            }
+
+            Object suzanne = Object(pDeviceContext, suzanneDataSet, suzanneMesh, colorTextureView, normalTextureView);
+            suzanne.transform.position = glm::vec3(-2.0F, 0.0F, 0.0F);
+
+            VkDescriptorSet cubeDataSet = VK_NULL_HANDLE;
+            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &objectDataSetAllocInfo, &cubeDataSet)))
+            {
+                printf("Vulkan descriptor set allocation failed\n");
+                return false;
+            }
+
+            Object cube = Object(pDeviceContext, cubeDataSet, cubeMesh, colorTextureView, normalTextureView);
+            cube.transform.position = glm::vec3(2.0F, 0.0F, 0.0F);
+
+            meshes.push_back(suzanneMesh);
+            meshes.push_back(cubeMesh);
             textures.push_back(colorTexture);
             textures.push_back(normalTexture);
-            objects.push_back(Object(pDeviceContext, objectDataSet, mesh, colorTexture, normalTexture));
+            textureViews.push_back(colorTextureView);
+            textureViews.push_back(normalTextureView);
+            objects.push_back(cube);
+            objects.push_back(suzanne);
         }
 
         printf("Initialized Vulkan Renderer\n");
@@ -740,9 +800,13 @@ namespace Engine
         // Wait for the last frame.
         vkWaitForFences(pDeviceContext->device, 1, &commandsFinished, VK_TRUE, UINT64_MAX);
 
-        // Destroy per-object data
+        // Destroy object data in scene
         for (auto& object : objects) {
             object.destroy();
+        }
+
+        for (auto& view : textureViews) {
+            vkDestroyImageView(pDeviceContext->device, view, nullptr);
         }
 
         for (auto& texture : textures) {
@@ -753,7 +817,7 @@ namespace Engine
             mesh.destroy();
         }
 
-        // Destroy per-scene data
+        // Destroy scene data
         sceneDataBuffer.destroy();
 
         // Destroy descriptor pools
@@ -959,7 +1023,7 @@ namespace Engine
         ImGui::Render();
 
         // Update scene data
-        camera.position = glm::vec3(2.0F, 2.0F, -5.0F);
+        camera.position = glm::vec3(0.0F, 2.0F, -5.0F);
         camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
 
         UniformSceneData sceneData{};
@@ -976,10 +1040,8 @@ namespace Engine
         assert(sceneDataBuffer.mapped);
         memcpy(sceneDataBuffer.pData, &sceneData, sizeof(UniformSceneData));
 
-        // Update object data
-        for (auto& object : objects)
-        {
-            object.transform.rotation = glm::rotate(object.transform.rotation, (float)frameTimer.deltaTimeMS() / 1000.0F, glm::vec3(0.0F, 1.0F, 0.0F));
+        // Update object data in scene
+        for (auto& object : objects) {
             object.update();
         }
     }

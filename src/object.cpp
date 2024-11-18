@@ -15,59 +15,19 @@ Object::Object(
     RenderDeviceContext* pDeviceContext,
     VkDescriptorSet objectDataSet,
     Mesh mesh,
-    Texture colorTexture,
-    Texture normalTexture
+    VkImageView colorTextureView,
+    VkImageView normalTextureView
 )
     :
     pDeviceContext(pDeviceContext),
     objectDataSet(objectDataSet),
     mesh(mesh),
-    colorTexture(colorTexture),
-    normalTexture(normalTexture)
+    colorTextureView(colorTextureView),
+    normalTextureView(normalTextureView)
 {
     if (!pDeviceContext->createBuffer(objectDataBuffer, sizeof(UniformObjectData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
     {
         throw std::runtime_error("VK Renderer object data buffer create failed");
-    }
-
-    VkImageViewCreateInfo colorTextureViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-    colorTextureViewCreateInfo.flags = 0;
-    colorTextureViewCreateInfo.image = colorTexture.handle;
-    colorTextureViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    colorTextureViewCreateInfo.format = colorTexture.format;
-    colorTextureViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    colorTextureViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    colorTextureViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    colorTextureViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    colorTextureViewCreateInfo.subresourceRange.baseMipLevel = 0;
-    colorTextureViewCreateInfo.subresourceRange.levelCount = colorTexture.levels;
-    colorTextureViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-    colorTextureViewCreateInfo.subresourceRange.layerCount = colorTexture.depthOrLayers;
-    colorTextureViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-    if (VK_FAILED(vkCreateImageView(pDeviceContext->device, &colorTextureViewCreateInfo, nullptr, &colorTextureView)))
-    {
-        throw std::runtime_error("VK Renderer color texture view create failed");
-    }
-
-    VkImageViewCreateInfo normalTextureViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-    normalTextureViewCreateInfo.flags = 0;
-    normalTextureViewCreateInfo.image = normalTexture.handle;
-    normalTextureViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    normalTextureViewCreateInfo.format = normalTexture.format;
-    normalTextureViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    normalTextureViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    normalTextureViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    normalTextureViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    normalTextureViewCreateInfo.subresourceRange.baseMipLevel = 0;
-    normalTextureViewCreateInfo.subresourceRange.levelCount = normalTexture.levels;
-    normalTextureViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-    normalTextureViewCreateInfo.subresourceRange.layerCount = normalTexture.depthOrLayers;
-    normalTextureViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-    if (VK_FAILED(vkCreateImageView(pDeviceContext->device, &normalTextureViewCreateInfo, nullptr, &normalTextureView)))
-    {
-        throw std::runtime_error("VK Renderer normal texture view create failed");
     }
 
     VkDescriptorBufferInfo objectDataBufferInfo{};
@@ -115,8 +75,6 @@ Object::Object(
 
 void Object::destroy()
 {
-    vkDestroyImageView(pDeviceContext->device, normalTextureView, nullptr);
-    vkDestroyImageView(pDeviceContext->device, colorTextureView, nullptr);
     objectDataBuffer.destroy();
 }
 

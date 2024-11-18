@@ -34,32 +34,30 @@ public:
     /// @param pDeviceContext Device context pointer.
     /// @param objectDataSet Object data descriptor set, preallocated.
     /// @param mesh Mesh struct, externally managed.
-    /// @param colorTexture Color texture, externally managed.
-    /// @param normalTexture Normal texture, externally managed.
+    /// @param colorTextureView Color texture view, externally managed.
+    /// @param normalTextureView Normal texture view, externally managed.
     Object(
         RenderDeviceContext* pDeviceContext,
         VkDescriptorSet objectDataSet,
         Mesh mesh,
-        Texture colorTexture,
-        Texture normalTexture
+        VkImageView colorTextureView,
+        VkImageView normalTextureView
     );
 
     /// @brief Destroy the object.
     void destroy();
 
-    /// @brief Update the object, uploading data to the GPU.
+    /// @brief Update the object state, uploading data to the GPU.
     void update();
 
 public:
     RenderDeviceContext* pDeviceContext;
     VkDescriptorSet objectDataSet;
     Mesh mesh;
-    Texture colorTexture;
-    Texture normalTexture;
-
-    Buffer objectDataBuffer{};
     VkImageView colorTextureView;
     VkImageView normalTextureView;
+
+    Buffer objectDataBuffer{};
 
     Transform transform{};
     float specularity = 0.5F;
