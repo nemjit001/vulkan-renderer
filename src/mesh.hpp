@@ -36,10 +36,3 @@ struct Mesh
 /// @param indexCount 
 /// @return A boolean indicating success
 bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertices, uint32_t vertexCount, uint32_t* indices, uint32_t indexCount);
-
-/// @brief Load an OBJ file from disk.
-/// @param pDeviceContext Render device context to use for mesh loading.
-/// @param path 
-/// @param mesh 
-/// @return A boolean indicating success.
-bool loadOBJ(RenderDeviceContext* pDeviceContext, char const* path, Mesh& mesh);

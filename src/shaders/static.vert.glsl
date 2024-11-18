@@ -22,6 +22,10 @@ layout(set = 0, binding = 0) uniform SCENE_DATA_UNIFORM
 	vec3 ambientLight;
 	vec3 cameraPosition;
 	mat4 viewproject;
+};
+
+layout(set = 1, binding = 0) uniform OBJECT_DATA_UNIFORM
+{
 	mat4 model;
 	mat4 normal;
 	float specularity;

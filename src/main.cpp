@@ -1,13 +1,8 @@
-#define _CRT_SECURE_NO_WARNINGS //< Used to silence C file IO function warnings
-
 #include <cassert>
-#include <cstdint>
-#include <cstdio>
 #include <iostream>
 #include <vector>
 
 #define SDL_MAIN_HANDLED
-#define STB_IMAGE_IMPLEMENTATION
 #define VK_NO_PROTOTYPES
 #define VOLK_IMPLEMENTATION
 #include <imgui.h>
@@ -15,300 +10,13 @@
 #include <imgui_impl_vulkan.h>
 #include <SDL.h>
 #include <SDL_vulkan.h>
-#include <stb_image.h>
 #include <volk.h>
 
+#include "assets.hpp"
 #include "math.hpp"
 #include "mesh.hpp"
 #include "renderer.hpp"
 #include "timer.hpp"
-
-namespace VulkanHelpers
-{
-    /// @brief Read a binary shader file.
-    /// @param path Path to the shader file.
-    /// @param shaderCode Shader code vector.
-    /// @return true on success, false otherwise.
-    bool readShaderFile(char const* path, std::vector<uint32_t>& shaderCode)
-    {
-        FILE* pFile = fopen(path, "rb");
-        if (pFile == nullptr)
-        {
-            printf("VK Renderer failed to open file [%s]\n", path);
-            return false;
-        }
-
-        fseek(pFile, 0, SEEK_END);
-        size_t codeSize = ftell(pFile);
-
-        assert(codeSize % 4 == 0);
-        shaderCode.resize(codeSize / 4, 0);
-
-        fseek(pFile, 0, SEEK_SET);
-        fread(shaderCode.data(), sizeof(uint32_t), shaderCode.size(), pFile);
-
-        fclose(pFile);
-        return true;
-    }
-
-    /// @brief Load a texture from disk.
-    /// @param pDeviceContext Device context to use for texture loading.
-    /// @param path 
-    /// @param texture 
-    /// @return A boolean indicating success.
-    bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture& texture)
-    {
-        int width = 0, height = 0, channels = 0;
-        stbi_uc* pImageData = stbi_load(path, &width, &height, &channels, 4);
-        if (pImageData == nullptr)
-        {
-            printf("STBI image load failed [%s]\n", path);
-            return false;
-        }
-        printf("Loaded texture [%s] (%d x %d x %d)\n", path, width, height, channels);
-
-        // Load all images as 4 channel color targets
-        VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
-        uint32_t mipLevels = static_cast<uint32_t>(std::log2(std::max(width, height))) + 1;
-        channels = 4;
-
-        printf("Texture has %d mip levels\n", mipLevels);
-
-        Buffer uploadBuffer{};
-        if (!pDeviceContext->createBuffer(
-            uploadBuffer,
-            width * height * channels,
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            true
-        )) {
-            stbi_image_free(pImageData);
-            return false;
-        }
-
-        assert(uploadBuffer.mapped && uploadBuffer.pData != nullptr);
-        memcpy(uploadBuffer.pData, pImageData, uploadBuffer.size);
-
-        if (!pDeviceContext->createTexture(
-            texture,
-            VK_IMAGE_TYPE_2D,
-            imageFormat,
-            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1,
-            mipLevels
-        )) {
-            uploadBuffer.destroy();
-            stbi_image_free(pImageData);
-            return false;
-        }
-
-        // Schedule upload using transient upload buffer
-        {
-            VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
-            if (!pDeviceContext->createCommandBuffer(CommandQueueType::Copy, &uploadCommandBuffer))
-            {
-                uploadBuffer.destroy();
-                stbi_image_free(pImageData);
-                return false;
-            }
-
-            VkCommandBufferBeginInfo uploadBeginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-            uploadBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-            uploadBeginInfo.pInheritanceInfo = nullptr;
-
-            if (VK_FAILED(vkBeginCommandBuffer(uploadCommandBuffer, &uploadBeginInfo)))
-            {
-                pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
-                uploadBuffer.destroy();
-                stbi_image_free(pImageData);
-                return false;
-            }
-
-            VkImageMemoryBarrier transferBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-            transferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            transferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            transferBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            transferBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            transferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            transferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            transferBarrier.image = texture.handle;
-            transferBarrier.subresourceRange.baseMipLevel = 0;
-            transferBarrier.subresourceRange.levelCount = texture.levels;
-            transferBarrier.subresourceRange.baseArrayLayer = 0;
-            transferBarrier.subresourceRange.layerCount = texture.depthOrLayers;
-            transferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-            vkCmdPipelineBarrier(uploadCommandBuffer,
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                0,
-                0, nullptr,
-                0, nullptr,
-                1, &transferBarrier
-            );
-
-            VkBufferImageCopy imageCopy{};
-            imageCopy.bufferOffset = 0;
-            imageCopy.bufferRowLength = width;
-            imageCopy.bufferImageHeight = height;
-            imageCopy.imageSubresource.mipLevel = 0;
-            imageCopy.imageSubresource.baseArrayLayer = 0;
-            imageCopy.imageSubresource.layerCount = 1;
-            imageCopy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            imageCopy.imageOffset = VkOffset3D{ 0, 0, 0 };
-            imageCopy.imageExtent = VkExtent3D{ static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 };
-
-            vkCmdCopyBufferToImage(
-                uploadCommandBuffer,
-                uploadBuffer.handle,
-                texture.handle,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                1, &imageCopy
-            );
-
-            // XXX: This mip calulcation only works for textures that are powers of 2
-            int32_t srcWidth = static_cast<int32_t>(texture.width);
-            int32_t srcHeight = static_cast<int32_t>(texture.height);
-            for (uint32_t level = 0; level < texture.levels - 1; level++)
-            {
-                int32_t dstWidth = srcWidth / 2;
-                int32_t dstHeight = srcHeight / 2;
-
-                printf("Blit [%d] (%d x %d) -> (%d x %d)\n", level, srcWidth, srcHeight, dstWidth, dstHeight);
-
-                VkImageMemoryBarrier srcMipBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-                srcMipBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-                srcMipBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-                srcMipBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-                srcMipBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-                srcMipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                srcMipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                srcMipBarrier.image = texture.handle;
-                srcMipBarrier.subresourceRange.baseMipLevel = level;
-                srcMipBarrier.subresourceRange.levelCount = 1;
-                srcMipBarrier.subresourceRange.baseArrayLayer = 0;
-                srcMipBarrier.subresourceRange.layerCount = texture.depthOrLayers;
-                srcMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-                VkImageMemoryBarrier dstMipBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-                dstMipBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-                dstMipBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-                dstMipBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                dstMipBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-                dstMipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                dstMipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                dstMipBarrier.image = texture.handle;
-                dstMipBarrier.subresourceRange.baseMipLevel = level + 1;
-                dstMipBarrier.subresourceRange.levelCount = 1;
-                dstMipBarrier.subresourceRange.baseArrayLayer = 0;
-                dstMipBarrier.subresourceRange.layerCount = texture.depthOrLayers;
-                dstMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-                VkImageMemoryBarrier mipBarriers[] = { srcMipBarrier, dstMipBarrier, };
-                vkCmdPipelineBarrier(uploadCommandBuffer,
-                    VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    0,
-                    0, nullptr,
-                    0, nullptr,
-                    SIZEOF_ARRAY(mipBarriers), mipBarriers
-                );
-
-                VkImageBlit blitRegion{};
-                blitRegion.srcOffsets[0] = VkOffset3D{ 0, 0, 0, };
-                blitRegion.srcOffsets[1] = VkOffset3D{ srcWidth, srcHeight, 1, };
-                blitRegion.srcSubresource.baseArrayLayer = 0;
-                blitRegion.srcSubresource.layerCount = 1;
-                blitRegion.srcSubresource.mipLevel = level;
-                blitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                blitRegion.dstOffsets[0] = VkOffset3D{ 0, 0, 0, };
-                blitRegion.dstOffsets[1] = VkOffset3D{ dstWidth, dstHeight, 1, };
-                blitRegion.dstSubresource.baseArrayLayer = 0;
-                blitRegion.dstSubresource.layerCount = 1;
-                blitRegion.dstSubresource.mipLevel = level + 1;
-                blitRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-                vkCmdBlitImage(
-                    uploadCommandBuffer,
-                    texture.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    texture.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    1, &blitRegion,
-                    VK_FILTER_LINEAR
-                );
-
-                srcWidth = dstWidth;
-                srcHeight = dstHeight;
-            }
-
-            VkImageMemoryBarrier shaderBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-            shaderBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            shaderBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            shaderBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            shaderBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            shaderBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            shaderBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            shaderBarrier.image = texture.handle;
-            shaderBarrier.subresourceRange.baseMipLevel = 0;
-            shaderBarrier.subresourceRange.levelCount = texture.levels;
-            shaderBarrier.subresourceRange.baseArrayLayer = 0;
-            shaderBarrier.subresourceRange.layerCount = texture.depthOrLayers;
-            shaderBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-            vkCmdPipelineBarrier(uploadCommandBuffer,
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                0,
-                0, nullptr,
-                0, nullptr,
-                1, &shaderBarrier
-            );
-
-            if (VK_FAILED(vkEndCommandBuffer(uploadCommandBuffer)))
-            {
-                pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
-                uploadBuffer.destroy();
-                stbi_image_free(pImageData);
-                return false;
-            }
-
-            VkFence uploadFence = VK_NULL_HANDLE;
-            if (!pDeviceContext->createFence(&uploadFence, false))
-            {
-                pDeviceContext->destroyFence(uploadFence);
-                uploadBuffer.destroy();
-                stbi_image_free(pImageData);
-                return false;
-            }
-
-            VkSubmitInfo uploadSubmit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
-            uploadSubmit.waitSemaphoreCount = 0;
-            uploadSubmit.pWaitSemaphores = nullptr;
-            uploadSubmit.pWaitDstStageMask = nullptr;
-            uploadSubmit.commandBufferCount = 1;
-            uploadSubmit.pCommandBuffers = &uploadCommandBuffer;
-            uploadSubmit.signalSemaphoreCount = 0;
-            uploadSubmit.pSignalSemaphores = nullptr;
-
-            if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &uploadSubmit, uploadFence)))
-            {
-                vkDestroyFence(pDeviceContext->device, uploadFence, nullptr);
-                pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
-                uploadBuffer.destroy();
-                stbi_image_free(pImageData);
-                return false;
-            }
-
-            vkWaitForFences(pDeviceContext->device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
-            pDeviceContext->destroyFence(uploadFence);
-            pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
-        }
-
-        uploadBuffer.destroy();
-        stbi_image_free(pImageData);
-        return true;
-    }
-} // namespace VulkanHelpers
 
 namespace Engine
 {
@@ -351,7 +59,7 @@ namespace Engine
         float zFar = 100.0F;
     };
 
-    /// @brief Uniform scene data structure, matches data uniform available in shaders.
+    /// @brief Uniform scene data structure.
     struct UniformSceneData
     {
         alignas(16) glm::vec3 sunDirection;
@@ -359,6 +67,11 @@ namespace Engine
         alignas(16) glm::vec3 ambientLight;
         alignas(16) glm::vec3 cameraPosition;
         alignas(16) glm::mat4 viewproject;
+    };
+
+    /// @brief Uniform per-object data.
+    struct UniformObjectData
+    {
         alignas(16) glm::mat4 model;
         alignas(16) glm::mat4 normal;
         alignas(4)  float specularity;
@@ -392,7 +105,8 @@ namespace Engine
 
     // Per pass data
     VkSampler textureSampler = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout sceneDataSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout objectDataSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline graphicsPipeline = VK_NULL_HANDLE;
     VkViewport viewport{};
@@ -400,15 +114,17 @@ namespace Engine
 
     // Scene data
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-    Buffer sceneDataBuffer{};
+    VkDescriptorSet sceneDataSet = VK_NULL_HANDLE;
+    VkDescriptorSet objectDataSet = VK_NULL_HANDLE;
 
     // Scene objects
+    Buffer sceneDataBuffer{};
     Camera camera{};
     Transform transform{};
     Mesh mesh{};
 
-    // Mesh material data
+    // Object data
+    Buffer objectDataBuffer{};
     Texture colorTexture{};
     VkImageView colorTextureView;
     Texture normalTexture{};
@@ -421,6 +137,7 @@ namespace Engine
     glm::vec3 ambientLight = glm::vec3(0.1F);
     float specularity = 0.5F;
     UniformSceneData sceneData{};
+    UniformObjectData objectData{};
 
     bool init()
     {
@@ -685,6 +402,25 @@ namespace Engine
             sceneDataUniformBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
             sceneDataUniformBinding.pImmutableSamplers = nullptr;
 
+            VkDescriptorSetLayoutBinding sceneDataSetLayoutBindings[] = { sceneDataUniformBinding };
+            VkDescriptorSetLayoutCreateInfo sceneDataSetLayoutCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+            sceneDataSetLayoutCreateInfo.flags = 0;
+            sceneDataSetLayoutCreateInfo.bindingCount = SIZEOF_ARRAY(sceneDataSetLayoutBindings);
+            sceneDataSetLayoutCreateInfo.pBindings = sceneDataSetLayoutBindings;
+
+            if (VK_FAILED(vkCreateDescriptorSetLayout(pDeviceContext->device, &sceneDataSetLayoutCreateInfo, nullptr, &sceneDataSetLayout)))
+            {
+                printf("Vulkan scene descriptor set layout create failed\n");
+                return false;
+            }
+
+            VkDescriptorSetLayoutBinding objectDataUniformBinding{};
+            objectDataUniformBinding.binding = 0;
+            objectDataUniformBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            objectDataUniformBinding.descriptorCount = 1;
+            objectDataUniformBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+            objectDataUniformBinding.pImmutableSamplers = nullptr;
+
             VkDescriptorSetLayoutBinding colorTextureBinding{};
             colorTextureBinding.binding = 1;
             colorTextureBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -699,19 +435,19 @@ namespace Engine
             normalTextureBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
             normalTextureBinding.pImmutableSamplers = &textureSampler;
 
-            VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[] = { sceneDataUniformBinding, colorTextureBinding, normalTextureBinding, };
-            VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-            descriptorSetLayoutCreateInfo.flags = 0;
-            descriptorSetLayoutCreateInfo.bindingCount = SIZEOF_ARRAY(descriptorSetLayoutBindings);
-            descriptorSetLayoutCreateInfo.pBindings = descriptorSetLayoutBindings;
+            VkDescriptorSetLayoutBinding objectDataSetLayoutBindings[] = { objectDataUniformBinding, colorTextureBinding, normalTextureBinding };
+            VkDescriptorSetLayoutCreateInfo objectDataSetLayoutCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+            objectDataSetLayoutCreateInfo.flags = 0;
+            objectDataSetLayoutCreateInfo.bindingCount = SIZEOF_ARRAY(objectDataSetLayoutBindings);
+            objectDataSetLayoutCreateInfo.pBindings = objectDataSetLayoutBindings;
 
-            if (VK_FAILED(vkCreateDescriptorSetLayout(pDeviceContext->device, &descriptorSetLayoutCreateInfo, nullptr, &descriptorSetLayout)))
+            if (VK_FAILED(vkCreateDescriptorSetLayout(pDeviceContext->device, &objectDataSetLayoutCreateInfo, nullptr, &objectDataSetLayout)))
             {
-                printf("Vulkan descriptor set layout create failed\n");
+                printf("Vulkan scene descriptor set layout create failed\n");
                 return false;
             }
 
-            VkDescriptorSetLayout descriptorSetLayouts[] = { descriptorSetLayout, };
+            VkDescriptorSetLayout descriptorSetLayouts[] = { sceneDataSetLayout, objectDataSetLayout, };
             VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
             pipelineLayoutCreateInfo.flags = 0;
             pipelineLayoutCreateInfo.setLayoutCount = SIZEOF_ARRAY(descriptorSetLayouts);
@@ -726,7 +462,7 @@ namespace Engine
             }
 
             std::vector<uint32_t> vertexShaderCode;
-            if (!VulkanHelpers::readShaderFile("static.vert.spv", vertexShaderCode))
+            if (!readShaderFile("static.vert.spv", vertexShaderCode))
             {
                 printf("VK Renderer vertex shader read failed\n");
                 return false;
@@ -745,7 +481,7 @@ namespace Engine
             }
 
             std::vector<uint32_t> fragmentShaderCode;
-            if (!VulkanHelpers::readShaderFile("forward.frag.spv", fragmentShaderCode))
+            if (!readShaderFile("forward.frag.spv", fragmentShaderCode))
             {
                 printf("VK Renderer fragment shader read failed\n");
                 return false;
@@ -916,16 +652,16 @@ namespace Engine
             vkDestroyShaderModule(pDeviceContext->device, vertexShader, nullptr);
         }
 
-        // Create uniform buffer with descriptor pool & descriptor sets
+        // Create uniform buffers with descriptor pool & descriptor sets
         {
             VkDescriptorPoolSize poolSizes[] = {
-                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 },
                 VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
             };
 
             VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
             descriptorPoolCreateInfo.flags = 0;
-            descriptorPoolCreateInfo.maxSets = 1;
+            descriptorPoolCreateInfo.maxSets = 2;
             descriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
             descriptorPoolCreateInfo.pPoolSizes = poolSizes;
 
@@ -935,16 +671,35 @@ namespace Engine
                 return false;
             }
 
-            VkDescriptorSetAllocateInfo descriptorSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-            descriptorSetAllocInfo.descriptorPool = descriptorPool;
-            descriptorSetAllocInfo.descriptorSetCount = 1;
-            descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayout;
+            VkDescriptorSetAllocateInfo sceneDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+            sceneDataSetAllocInfo.descriptorPool = descriptorPool;
+            sceneDataSetAllocInfo.descriptorSetCount = 1;
+            sceneDataSetAllocInfo.pSetLayouts = &sceneDataSetLayout;
 
-            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &descriptorSetAllocInfo, &descriptorSet)))
+            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &sceneDataSetAllocInfo, &sceneDataSet)))
             {
                 printf("Vulkan descriptor set allocation failed\n");
                 return false;
             }
+
+            VkDescriptorSetAllocateInfo objectDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+            objectDataSetAllocInfo.descriptorPool = descriptorPool;
+            objectDataSetAllocInfo.descriptorSetCount = 1;
+            objectDataSetAllocInfo.pSetLayouts = &objectDataSetLayout;
+
+            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &objectDataSetAllocInfo, &objectDataSet)))
+            {
+                printf("Vulkan descriptor set allocation failed\n");
+                return false;
+            }
+        }
+
+        // Set up scene data
+        {
+            camera.position = glm::vec3(0.0F, 0.0F, -5.0F);
+            camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
+            camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
+            transform = Transform{};
 
             if (!pDeviceContext->createBuffer(sceneDataBuffer, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
             {
@@ -953,29 +708,27 @@ namespace Engine
             }
         }
 
-        // Set up scene data & load mesh
+        // Set up object data
         {
-            camera.position = glm::vec3(0.0F, 0.0F, -5.0F);
-            camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
-            camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
-            transform = Transform{};
+            if (!pDeviceContext->createBuffer(objectDataBuffer, sizeof(UniformObjectData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
+            {
+                printf("Vulkan object data buffer create failed\n");
+                return false;
+            }
 
             if (!loadOBJ(pDeviceContext, "data/assets/suzanne.obj", mesh))
             {
                 printf("VK Renderer mesh load failed\n");
                 return false;
             }
-        }
 
-        // Load material data
-        {
-            if (!VulkanHelpers::loadTexture(pDeviceContext, "data/assets/brickwall.jpg", colorTexture))
+            if (!loadTexture(pDeviceContext, "data/assets/brickwall.jpg", colorTexture))
             {
                 printf("Vulkan color texture create failed\n");
                 return false;
             }
 
-            if (!VulkanHelpers::loadTexture(pDeviceContext, "data/assets/brickwall_normal.jpg", normalTexture))
+            if (!loadTexture(pDeviceContext, "data/assets/brickwall_normal.jpg", normalTexture))
             {
                 printf("Vulkan normal texture create failed\n");
                 return false;
@@ -1031,6 +784,19 @@ namespace Engine
             sceneDataBufferInfo.offset = 0;
             sceneDataBufferInfo.range = sceneDataBuffer.size;
 
+            VkWriteDescriptorSet sceneDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            sceneDataWrite.dstSet = sceneDataSet;
+            sceneDataWrite.dstBinding = 0;
+            sceneDataWrite.dstArrayElement = 0;
+            sceneDataWrite.descriptorCount = 1;
+            sceneDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            sceneDataWrite.pBufferInfo = &sceneDataBufferInfo;
+
+            VkDescriptorBufferInfo objectDataBufferInfo{};
+            objectDataBufferInfo.buffer = objectDataBuffer.handle;
+            objectDataBufferInfo.offset = 0;
+            objectDataBufferInfo.range = objectDataBuffer.size;
+
             VkDescriptorImageInfo colorTextureInfo{};
             colorTextureInfo.sampler = VK_NULL_HANDLE;
             colorTextureInfo.imageView = colorTextureView;
@@ -1041,16 +807,16 @@ namespace Engine
             normalTextureInfo.imageView = normalTextureView;
             normalTextureInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-            VkWriteDescriptorSet sceneDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            sceneDataWrite.dstSet = descriptorSet;
-            sceneDataWrite.dstBinding = 0;
-            sceneDataWrite.dstArrayElement = 0;
-            sceneDataWrite.descriptorCount = 1;
-            sceneDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            sceneDataWrite.pBufferInfo = &sceneDataBufferInfo;
+            VkWriteDescriptorSet objectDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            objectDataWrite.dstSet = objectDataSet;
+            objectDataWrite.dstBinding = 0;
+            objectDataWrite.dstArrayElement = 0;
+            objectDataWrite.descriptorCount = 1;
+            objectDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            objectDataWrite.pBufferInfo = &objectDataBufferInfo;
 
             VkWriteDescriptorSet colorTextureWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            colorTextureWrite.dstSet = descriptorSet;
+            colorTextureWrite.dstSet = objectDataSet;
             colorTextureWrite.dstBinding = 1;
             colorTextureWrite.dstArrayElement = 0;
             colorTextureWrite.descriptorCount = 1;
@@ -1058,14 +824,14 @@ namespace Engine
             colorTextureWrite.pImageInfo = &colorTextureInfo;
 
             VkWriteDescriptorSet normalTextureWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            normalTextureWrite.dstSet = descriptorSet;
+            normalTextureWrite.dstSet = objectDataSet;
             normalTextureWrite.dstBinding = 2;
             normalTextureWrite.dstArrayElement = 0;
             normalTextureWrite.descriptorCount = 1;
             normalTextureWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             normalTextureWrite.pImageInfo = &normalTextureInfo;
 
-            VkWriteDescriptorSet descriptorWrites[] = { sceneDataWrite, colorTextureWrite, normalTextureWrite, };
+            VkWriteDescriptorSet descriptorWrites[] = { sceneDataWrite, objectDataWrite, colorTextureWrite, normalTextureWrite, };
             vkUpdateDescriptorSets(pDeviceContext->device, SIZEOF_ARRAY(descriptorWrites), descriptorWrites, 0, nullptr);
         }
 
@@ -1083,17 +849,17 @@ namespace Engine
         normalTexture.destroy();
         vkDestroyImageView(pDeviceContext->device, colorTextureView, nullptr);
         colorTexture.destroy();
-
         mesh.destroy();
 
-        sceneDataBuffer.unmap();
+        objectDataBuffer.destroy();        
         sceneDataBuffer.destroy();
 
         vkDestroyDescriptorPool(pDeviceContext->device, descriptorPool, nullptr);
 
         vkDestroyPipeline(pDeviceContext->device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(pDeviceContext->device, pipelineLayout, nullptr);
-        vkDestroyDescriptorSetLayout(pDeviceContext->device, descriptorSetLayout, nullptr);
+        vkDestroyDescriptorSetLayout(pDeviceContext->device, objectDataSetLayout, nullptr);
+        vkDestroyDescriptorSetLayout(pDeviceContext->device, sceneDataSetLayout, nullptr);
         vkDestroySampler(pDeviceContext->device, textureSampler, nullptr);
 
         ImGui_ImplVulkan_Shutdown();
@@ -1301,13 +1067,18 @@ namespace Engine
         sceneData.ambientLight = ambientLight;
         sceneData.cameraPosition = glm::vec3(0.0F, 0.0F, -5.0F);
         sceneData.viewproject = camera.matrix();
-        sceneData.model = transform.matrix();
-        sceneData.normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(sceneData.model))));
-        sceneData.specularity = specularity;
 
-        // Update uniform buffer
+        // Update object data
+        objectData.model = transform.matrix();
+        objectData.normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(objectData.model))));
+        objectData.specularity = specularity;
+
+        // Update uniform buffers
         assert(sceneDataBuffer.mapped);
         memcpy(sceneDataBuffer.pData, &sceneData, sizeof(UniformSceneData));
+
+        assert(objectDataBuffer.mapped);
+        memcpy(objectDataBuffer.pData, &objectData, sizeof(UniformObjectData));
     }
 
     void render()
@@ -1357,7 +1128,8 @@ namespace Engine
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
             // Bind descriptor sets
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+            VkDescriptorSet descriptorSets[] = { sceneDataSet, objectDataSet, };
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, SIZEOF_ARRAY(descriptorSets), descriptorSets, 0, nullptr);
 
             // Draw mesh
             VkBuffer vertexBuffers[] = { mesh.vertexBuffer.handle, };
