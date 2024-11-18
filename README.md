@@ -9,6 +9,7 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 
 - [X] OBJ mesh loading
 - [X] Texture mapping
+	- [X] automatic mipmap generation
 - [X] ImGui support
 - [ ] Virtual camera support
 	- [X] Perspective camera

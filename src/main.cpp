@@ -112,23 +112,24 @@ namespace Engine
     VkViewport viewport{};
     VkRect2D scissor{};
 
-    // Scene data
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    VkDescriptorSet sceneDataSet = VK_NULL_HANDLE;
-    VkDescriptorSet objectDataSet = VK_NULL_HANDLE;
+    // Descriptor pools
+    VkDescriptorPool sceneDescriptorPool = VK_NULL_HANDLE;
+    VkDescriptorPool objectDescriptorPool = VK_NULL_HANDLE;
 
-    // Scene objects
+    // Scene data
+    VkDescriptorSet sceneDataSet = VK_NULL_HANDLE;
     Buffer sceneDataBuffer{};
     Camera camera{};
-    Transform transform{};
-    Mesh mesh{};
 
     // Object data
+    VkDescriptorSet objectDataSet = VK_NULL_HANDLE;
     Buffer objectDataBuffer{};
+    Transform transform{};
     Texture colorTexture{};
     VkImageView colorTextureView;
     Texture normalTexture{};
     VkImageView normalTextureView;
+    Mesh mesh{};
 
     // CPU side render data
     float sunAzimuth = 0.0F;
@@ -652,27 +653,46 @@ namespace Engine
             vkDestroyShaderModule(pDeviceContext->device, vertexShader, nullptr);
         }
 
-        // Create uniform buffers with descriptor pool & descriptor sets
+        // Create descriptor pools
         {
-            VkDescriptorPoolSize poolSizes[] = {
-                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 },
-                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
+            VkDescriptorPoolSize scenePoolSizes[] = {
+                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
             };
 
-            VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-            descriptorPoolCreateInfo.flags = 0;
-            descriptorPoolCreateInfo.maxSets = 2;
-            descriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
-            descriptorPoolCreateInfo.pPoolSizes = poolSizes;
+            VkDescriptorPoolCreateInfo sceneDescriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+            sceneDescriptorPoolCreateInfo.flags = 0;
+            sceneDescriptorPoolCreateInfo.maxSets = 1;
+            sceneDescriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(scenePoolSizes);
+            sceneDescriptorPoolCreateInfo.pPoolSizes = scenePoolSizes;
 
-            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &descriptorPoolCreateInfo, nullptr, &descriptorPool)))
+            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &sceneDescriptorPoolCreateInfo, nullptr, &sceneDescriptorPool)))
             {
-                printf("Vulkan descriptor pool create failed\n");
+                printf("Vulkan scene descriptor pool create failed\n");
                 return false;
             }
 
+            VkDescriptorPoolSize objectPoolSizes[] = {
+                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
+            };
+
+            VkDescriptorPoolCreateInfo objectDescriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+            objectDescriptorPoolCreateInfo.flags = 0;
+            objectDescriptorPoolCreateInfo.maxSets = 1;
+            objectDescriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(objectPoolSizes);
+            objectDescriptorPoolCreateInfo.pPoolSizes = objectPoolSizes;
+
+            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &objectDescriptorPoolCreateInfo, nullptr, &objectDescriptorPool)))
+            {
+                printf("Vulkan object descriptor pool create failed\n");
+                return false;
+            }
+        }
+
+        // Set up scene data
+        {
             VkDescriptorSetAllocateInfo sceneDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-            sceneDataSetAllocInfo.descriptorPool = descriptorPool;
+            sceneDataSetAllocInfo.descriptorPool = sceneDescriptorPool;
             sceneDataSetAllocInfo.descriptorSetCount = 1;
             sceneDataSetAllocInfo.pSetLayouts = &sceneDataSetLayout;
 
@@ -682,20 +702,6 @@ namespace Engine
                 return false;
             }
 
-            VkDescriptorSetAllocateInfo objectDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-            objectDataSetAllocInfo.descriptorPool = descriptorPool;
-            objectDataSetAllocInfo.descriptorSetCount = 1;
-            objectDataSetAllocInfo.pSetLayouts = &objectDataSetLayout;
-
-            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &objectDataSetAllocInfo, &objectDataSet)))
-            {
-                printf("Vulkan descriptor set allocation failed\n");
-                return false;
-            }
-        }
-
-        // Set up scene data
-        {
             camera.position = glm::vec3(0.0F, 0.0F, -5.0F);
             camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
             camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
@@ -706,19 +712,39 @@ namespace Engine
                 printf("Vulkan scene data buffer create failed\n");
                 return false;
             }
+
+            VkDescriptorBufferInfo sceneDataBufferInfo{};
+            sceneDataBufferInfo.buffer = sceneDataBuffer.handle;
+            sceneDataBufferInfo.offset = 0;
+            sceneDataBufferInfo.range = sceneDataBuffer.size;
+
+            VkWriteDescriptorSet sceneDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            sceneDataWrite.dstSet = sceneDataSet;
+            sceneDataWrite.dstBinding = 0;
+            sceneDataWrite.dstArrayElement = 0;
+            sceneDataWrite.descriptorCount = 1;
+            sceneDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            sceneDataWrite.pBufferInfo = &sceneDataBufferInfo;
+
+            vkUpdateDescriptorSets(pDeviceContext->device, 1, &sceneDataWrite, 0, nullptr);
         }
 
         // Set up object data
         {
-            if (!pDeviceContext->createBuffer(objectDataBuffer, sizeof(UniformObjectData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
+            VkDescriptorSetAllocateInfo objectDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+            objectDataSetAllocInfo.descriptorPool = objectDescriptorPool;
+            objectDataSetAllocInfo.descriptorSetCount = 1;
+            objectDataSetAllocInfo.pSetLayouts = &objectDataSetLayout;
+
+            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &objectDataSetAllocInfo, &objectDataSet)))
             {
-                printf("Vulkan object data buffer create failed\n");
+                printf("Vulkan descriptor set allocation failed\n");
                 return false;
             }
 
-            if (!loadOBJ(pDeviceContext, "data/assets/suzanne.obj", mesh))
+            if (!pDeviceContext->createBuffer(objectDataBuffer, sizeof(UniformObjectData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
             {
-                printf("VK Renderer mesh load failed\n");
+                printf("Vulkan object data buffer create failed\n");
                 return false;
             }
 
@@ -775,22 +801,12 @@ namespace Engine
                 printf("Vulkan color texture view create failed\n");
                 return false;
             }
-        }
 
-        // Update descriptor sets
-        {
-            VkDescriptorBufferInfo sceneDataBufferInfo{};
-            sceneDataBufferInfo.buffer = sceneDataBuffer.handle;
-            sceneDataBufferInfo.offset = 0;
-            sceneDataBufferInfo.range = sceneDataBuffer.size;
-
-            VkWriteDescriptorSet sceneDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            sceneDataWrite.dstSet = sceneDataSet;
-            sceneDataWrite.dstBinding = 0;
-            sceneDataWrite.dstArrayElement = 0;
-            sceneDataWrite.descriptorCount = 1;
-            sceneDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            sceneDataWrite.pBufferInfo = &sceneDataBufferInfo;
+            if (!loadOBJ(pDeviceContext, "data/assets/suzanne.obj", mesh))
+            {
+                printf("VK Renderer mesh load failed\n");
+                return false;
+            }
 
             VkDescriptorBufferInfo objectDataBufferInfo{};
             objectDataBufferInfo.buffer = objectDataBuffer.handle;
@@ -831,8 +847,8 @@ namespace Engine
             normalTextureWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             normalTextureWrite.pImageInfo = &normalTextureInfo;
 
-            VkWriteDescriptorSet descriptorWrites[] = { sceneDataWrite, objectDataWrite, colorTextureWrite, normalTextureWrite, };
-            vkUpdateDescriptorSets(pDeviceContext->device, SIZEOF_ARRAY(descriptorWrites), descriptorWrites, 0, nullptr);
+            VkWriteDescriptorSet objectDescriptorWrites[] = { objectDataWrite, colorTextureWrite, normalTextureWrite, };
+            vkUpdateDescriptorSets(pDeviceContext->device, SIZEOF_ARRAY(objectDescriptorWrites), objectDescriptorWrites, 0, nullptr);
         }
 
         printf("Initialized Vulkan Renderer\n");
@@ -845,16 +861,17 @@ namespace Engine
 
         vkWaitForFences(pDeviceContext->device, 1, &commandsFinished, VK_TRUE, UINT64_MAX);
 
+        mesh.destroy();
         vkDestroyImageView(pDeviceContext->device, normalTextureView, nullptr);
         normalTexture.destroy();
         vkDestroyImageView(pDeviceContext->device, colorTextureView, nullptr);
         colorTexture.destroy();
-        mesh.destroy();
+        objectDataBuffer.destroy();     
 
-        objectDataBuffer.destroy();        
         sceneDataBuffer.destroy();
 
-        vkDestroyDescriptorPool(pDeviceContext->device, descriptorPool, nullptr);
+        vkDestroyDescriptorPool(pDeviceContext->device, objectDescriptorPool, nullptr);
+        vkDestroyDescriptorPool(pDeviceContext->device, sceneDescriptorPool, nullptr);
 
         vkDestroyPipeline(pDeviceContext->device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(pDeviceContext->device, pipelineLayout, nullptr);
@@ -1128,8 +1145,8 @@ namespace Engine
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
             // Bind descriptor sets
-            VkDescriptorSet descriptorSets[] = { sceneDataSet, objectDataSet, };
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, SIZEOF_ARRAY(descriptorSets), descriptorSets, 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &sceneDataSet, 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &objectDataSet, 0, nullptr);
 
             // Draw mesh
             VkBuffer vertexBuffers[] = { mesh.vertexBuffer.handle, };
