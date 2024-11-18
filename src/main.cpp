@@ -616,17 +616,38 @@ namespace Engine
         }
 
         // Set up scene object data
-        {            
+        {
+            Vertex vertices[] = {
+                Vertex{ { -1.0F, 0.0F, -1.0F }, { 1.0F, 1.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 1.0F, 0.0F, 0.0F }, { 0.0F, 0.0F } },
+                Vertex{ { -1.0F, 0.0F,  1.0F }, { 1.0F, 1.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 1.0F, 0.0F, 0.0F }, { 1.0F, 0.0F } },
+                Vertex{ {  1.0F, 0.0F,  1.0F }, { 1.0F, 1.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 1.0F, 0.0F, 0.0F }, { 1.0F, 1.0F } },
+                Vertex{ {  1.0F, 0.0F, -1.0F }, { 1.0F, 1.0F, 1.0F }, { 0.0F, 1.0F, 0.0F }, { 1.0F, 0.0F, 0.0F }, { 0.0F, 1.0F } },
+            };
+
+            uint32_t indices[] = {
+                0, 1, 2,
+                2, 3, 0
+            };
+
+            Mesh planeMesh{};
+            if (!createMesh(pDeviceContext, planeMesh, vertices, SIZEOF_ARRAY(vertices), indices, SIZEOF_ARRAY(indices)))
+            {
+                printf("VK Renderer mesh create failed\n");
+                return false;
+            }
+
             Mesh suzanneMesh{};
             if (!loadOBJ(pDeviceContext, "data/assets/suzanne.obj", suzanneMesh))
             {
-                throw std::runtime_error("VK Renderer mesh load failed");
+                printf("VK Renderer mesh load failed\n");
+                return false;
             }
 
             Mesh cubeMesh{};
             if (!loadOBJ(pDeviceContext, "data/assets/cube.obj", cubeMesh))
             {
-                throw std::runtime_error("VK Renderer mesh load failed");
+                printf("VK Renderer mesh load failed\n");
+                return false;
             }
 
             Texture colorTexture{};
@@ -634,7 +655,8 @@ namespace Engine
             if (!loadTexture(pDeviceContext, "data/assets/brickwall.jpg", colorTexture)
                 || !loadTexture(pDeviceContext, "data/assets/brickwall_normal.jpg", normalTexture))
             {
-                throw std::runtime_error("VK Renderer texture loading failed");
+                printf("VK Renderer texture loading failed\n");
+                return false;
             }
 
             VkImageViewCreateInfo colorTextureViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
@@ -700,14 +722,27 @@ namespace Engine
             Object cube = Object(pDeviceContext, cubeDataSet, cubeMesh, colorTextureView, normalTextureView);
             cube.transform.position = glm::vec3(2.0F, 0.0F, 0.0F);
 
+            VkDescriptorSet planeDataSet = VK_NULL_HANDLE;
+            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &objectDataSetAllocInfo, &planeDataSet)))
+            {
+                printf("Vulkan descriptor set allocation failed\n");
+                return false;
+            }
+
+            Object plane = Object(pDeviceContext, planeDataSet, planeMesh, colorTextureView, normalTextureView);
+            plane.transform.position = glm::vec3(0.0F, -1.0F, 0.0F);
+            plane.transform.scale = glm::vec3(5.0F, 5.0F, 5.0F);
+
             scene.meshes.push_back(suzanneMesh);
             scene.meshes.push_back(cubeMesh);
+            scene.meshes.push_back(planeMesh);
             scene.textures.push_back(colorTexture);
             scene.textures.push_back(normalTexture);
             scene.textureViews.push_back(colorTextureView);
             scene.textureViews.push_back(normalTextureView);
             scene.objects.push_back(cube);
             scene.objects.push_back(suzanne);
+            scene.objects.push_back(plane);
         }
 
         printf("Initialized Vulkan Renderer\n");

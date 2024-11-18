@@ -189,7 +189,7 @@ void Scene::update()
         glm::cos(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
         glm::cos(glm::radians(90.0F - sunZenith)),
         glm::sin(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
-        });
+    });
     sceneData.sunColor = sunColor;
     sceneData.ambientLight = ambientLight;
     sceneData.cameraPosition = glm::vec3(0.0F, 0.0F, -5.0F);

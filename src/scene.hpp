@@ -97,11 +97,12 @@ public:
     std::vector<Mesh> meshes{};
     std::vector<Texture> textures{};
     std::vector<VkImageView> textureViews{};
-    std::vector<Object> objects{};
 
     float sunAzimuth = 0.0F;
     float sunZenith = 0.0F;
     glm::vec3 sunColor = glm::vec3(1.0F);
     glm::vec3 ambientLight = glm::vec3(0.1F);
     Camera camera{};
+
+    std::vector<Object> objects{};
 };
