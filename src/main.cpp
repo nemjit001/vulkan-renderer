@@ -14,44 +14,12 @@
 
 #include "assets.hpp"
 #include "math.hpp"
-#include "object.hpp"
+#include "scene.hpp"
 #include "renderer.hpp"
 #include "timer.hpp"
 
 namespace Engine
 {
-    /// @brief Virtual camera.
-    struct Camera
-    {
-        /// @brief Calculate the view and projection matrix for this camera.
-        /// @return 
-        glm::mat4 matrix() const
-        {
-            return glm::perspective(glm::radians(FOVy), aspectRatio, zNear, zFar) * glm::lookAt(position, position + forward, up);
-        }
-
-        // Camera transform
-        glm::vec3 position = glm::vec3(0.0F);
-        glm::vec3 forward = glm::vec3(0.0F, 0.0F, 1.0F);
-        glm::vec3 up = glm::vec3(0.0F, 1.0F, 0.0F);
-
-        // Perspective camera data
-        float FOVy = 60.0F;
-        float aspectRatio = 1.0F;
-        float zNear = 0.1F;
-        float zFar = 100.0F;
-    };
-
-    /// @brief Uniform scene data structure.
-    struct UniformSceneData
-    {
-        alignas(16) glm::vec3 sunDirection;
-        alignas(16) glm::vec3 sunColor;
-        alignas(16) glm::vec3 ambientLight;
-        alignas(16) glm::vec3 cameraPosition;
-        alignas(16) glm::mat4 viewproject;
-    };
-
     constexpr char const* pWindowTitle = "Vulkan Renderer";
     constexpr uint32_t DefaultWindowWidth = 1600;
     constexpr uint32_t DefaultWindowHeight = 900;
@@ -87,24 +55,9 @@ namespace Engine
     VkViewport viewport{};
     VkRect2D scissor{};
 
-    // Descriptor pools
-    VkDescriptorPool sceneDescriptorPool = VK_NULL_HANDLE;
-    VkDescriptorPool objectDescriptorPool = VK_NULL_HANDLE;
-
     // Scene data
-    VkDescriptorSet sceneDataSet = VK_NULL_HANDLE;
-    Buffer sceneDataBuffer{};
-    Camera camera{};
-    std::vector<Mesh> meshes{};
-    std::vector<Texture> textures{};
-    std::vector<VkImageView> textureViews{};
-    std::vector<Object> objects{};
-
-    // CPU side render data
-    float sunAzimuth = 0.0F;
-    float sunZenith = 0.0F;
-    glm::vec3 sunColor = glm::vec3(1.0F);
-    glm::vec3 ambientLight = glm::vec3(0.1F);
+    VkDescriptorPool sceneDescriptorPool = VK_NULL_HANDLE;
+    Scene scene{};
 
     bool init()
     {
@@ -619,38 +572,23 @@ namespace Engine
             vkDestroyShaderModule(pDeviceContext->device, vertexShader, nullptr);
         }
 
-        // Create descriptor pools
+        // Create scene data
         {
+            uint32_t const maxSceneCount = 1;
+
             VkDescriptorPoolSize scenePoolSizes[] = {
-                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * maxSceneCount },
             };
 
             VkDescriptorPoolCreateInfo sceneDescriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
             sceneDescriptorPoolCreateInfo.flags = 0;
-            sceneDescriptorPoolCreateInfo.maxSets = 1;
+            sceneDescriptorPoolCreateInfo.maxSets = maxSceneCount;
             sceneDescriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(scenePoolSizes);
             sceneDescriptorPoolCreateInfo.pPoolSizes = scenePoolSizes;
 
             if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &sceneDescriptorPoolCreateInfo, nullptr, &sceneDescriptorPool)))
             {
                 printf("Vulkan scene descriptor pool create failed\n");
-                return false;
-            }
-
-            VkDescriptorPoolSize objectPoolSizes[] = {
-                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 },
-                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 },
-            };
-
-            VkDescriptorPoolCreateInfo objectDescriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-            objectDescriptorPoolCreateInfo.flags = 0;
-            objectDescriptorPoolCreateInfo.maxSets = 2;
-            objectDescriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(objectPoolSizes);
-            objectDescriptorPoolCreateInfo.pPoolSizes = objectPoolSizes;
-
-            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &objectDescriptorPoolCreateInfo, nullptr, &objectDescriptorPool)))
-            {
-                printf("Vulkan object descriptor pool create failed\n");
                 return false;
             }
         }
@@ -662,36 +600,17 @@ namespace Engine
             sceneDataSetAllocInfo.descriptorSetCount = 1;
             sceneDataSetAllocInfo.pSetLayouts = &sceneDataSetLayout;
 
+            VkDescriptorSet sceneDataSet = VK_NULL_HANDLE;
             if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &sceneDataSetAllocInfo, &sceneDataSet)))
             {
                 printf("Vulkan descriptor set allocation failed\n");
                 return false;
             }
 
-            camera.position = glm::vec3(0.0F, 0.0F, -5.0F);
-            camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
-            camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
-
-            if (!pDeviceContext->createBuffer(sceneDataBuffer, sizeof(UniformSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true))
-            {
-                printf("Vulkan scene data buffer create failed\n");
-                return false;
-            }
-
-            VkDescriptorBufferInfo sceneDataBufferInfo{};
-            sceneDataBufferInfo.buffer = sceneDataBuffer.handle;
-            sceneDataBufferInfo.offset = 0;
-            sceneDataBufferInfo.range = sceneDataBuffer.size;
-
-            VkWriteDescriptorSet sceneDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            sceneDataWrite.dstSet = sceneDataSet;
-            sceneDataWrite.dstBinding = 0;
-            sceneDataWrite.dstArrayElement = 0;
-            sceneDataWrite.descriptorCount = 1;
-            sceneDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            sceneDataWrite.pBufferInfo = &sceneDataBufferInfo;
-
-            vkUpdateDescriptorSets(pDeviceContext->device, 1, &sceneDataWrite, 0, nullptr);
+            scene = Scene(pDeviceContext, sceneDataSet);
+            scene.camera.position = glm::vec3(0.0F, 0.0F, -5.0F);
+            scene.camera.forward = glm::normalize(glm::vec3(0.0F) - scene.camera.position);
+            scene.camera.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
         }
 
         // Set up scene object data
@@ -755,7 +674,7 @@ namespace Engine
             }
 
             VkDescriptorSetAllocateInfo objectDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-            objectDataSetAllocInfo.descriptorPool = objectDescriptorPool;
+            objectDataSetAllocInfo.descriptorPool = scene.objectDescriptorPool;
             objectDataSetAllocInfo.descriptorSetCount = 1;
             objectDataSetAllocInfo.pSetLayouts = &objectDataSetLayout;
 
@@ -779,14 +698,14 @@ namespace Engine
             Object cube = Object(pDeviceContext, cubeDataSet, cubeMesh, colorTextureView, normalTextureView);
             cube.transform.position = glm::vec3(2.0F, 0.0F, 0.0F);
 
-            meshes.push_back(suzanneMesh);
-            meshes.push_back(cubeMesh);
-            textures.push_back(colorTexture);
-            textures.push_back(normalTexture);
-            textureViews.push_back(colorTextureView);
-            textureViews.push_back(normalTextureView);
-            objects.push_back(cube);
-            objects.push_back(suzanne);
+            scene.meshes.push_back(suzanneMesh);
+            scene.meshes.push_back(cubeMesh);
+            scene.textures.push_back(colorTexture);
+            scene.textures.push_back(normalTexture);
+            scene.textureViews.push_back(colorTextureView);
+            scene.textureViews.push_back(normalTextureView);
+            scene.objects.push_back(cube);
+            scene.objects.push_back(suzanne);
         }
 
         printf("Initialized Vulkan Renderer\n");
@@ -800,28 +719,8 @@ namespace Engine
         // Wait for the last frame.
         vkWaitForFences(pDeviceContext->device, 1, &commandsFinished, VK_TRUE, UINT64_MAX);
 
-        // Destroy object data in scene
-        for (auto& object : objects) {
-            object.destroy();
-        }
-
-        for (auto& view : textureViews) {
-            vkDestroyImageView(pDeviceContext->device, view, nullptr);
-        }
-
-        for (auto& texture : textures) {
-            texture.destroy();
-        }
-
-        for (auto& mesh : meshes) {
-            mesh.destroy();
-        }
-
         // Destroy scene data
-        sceneDataBuffer.destroy();
-
-        // Destroy descriptor pools
-        vkDestroyDescriptorPool(pDeviceContext->device, objectDescriptorPool, nullptr);
+        scene.destroy();
         vkDestroyDescriptorPool(pDeviceContext->device, sceneDescriptorPool, nullptr);
 
         // Destroy graphics pipeline & associated data
@@ -957,7 +856,7 @@ namespace Engine
         scissor = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight, }};
 
         // Update camera aspect ratio
-        camera.aspectRatio = viewportWidth / viewportHeight;
+        scene.camera.aspectRatio = viewportWidth / viewportHeight;
     }
 
     void update()
@@ -1010,10 +909,10 @@ namespace Engine
             ImGui::RadioButton("VSync Disabled with tearing", false);
 
             ImGui::SeparatorText("Scene");
-            ImGui::DragFloat("Sun Azimuth", &sunAzimuth, 1.0F, 0.0F, 360.0F);
-            ImGui::DragFloat("Sun Zenith", &sunZenith, 1.0F, -90.0F, 90.0F);
-            ImGui::ColorEdit3("Sun Color", &sunColor[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
-            ImGui::ColorEdit3("Ambient Light", &ambientLight[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
+            ImGui::DragFloat("Sun Azimuth", &scene.sunAzimuth, 1.0F, 0.0F, 360.0F);
+            ImGui::DragFloat("Sun Zenith", &scene.sunZenith, 1.0F, -90.0F, 90.0F);
+            ImGui::ColorEdit3("Sun Color", &scene.sunColor[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
+            ImGui::ColorEdit3("Ambient Light", &scene.ambientLight[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_InputRGB);
 
             // ImGui::SeparatorText("Object data");
             // ImGui::DragFloat("Specularity", &pObject->specularity, 0.01F, 0.0F, 1.0F);
@@ -1023,27 +922,9 @@ namespace Engine
         ImGui::Render();
 
         // Update scene data
-        camera.position = glm::vec3(0.0F, 2.0F, -5.0F);
-        camera.forward = glm::normalize(glm::vec3(0.0F) - camera.position);
-
-        UniformSceneData sceneData{};
-        sceneData.sunDirection = glm::normalize(glm::vec3{
-            glm::cos(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
-            glm::cos(glm::radians(90.0F - sunZenith)),
-            glm::sin(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
-            });
-        sceneData.sunColor = sunColor;
-        sceneData.ambientLight = ambientLight;
-        sceneData.cameraPosition = glm::vec3(0.0F, 0.0F, -5.0F);
-        sceneData.viewproject = camera.matrix();
-
-        assert(sceneDataBuffer.mapped);
-        memcpy(sceneDataBuffer.pData, &sceneData, sizeof(UniformSceneData));
-
-        // Update object data in scene
-        for (auto& object : objects) {
-            object.update();
-        }
+        scene.camera.position = glm::vec3(0.0F, 2.0F, -5.0F);
+        scene.camera.forward = glm::normalize(glm::vec3(0.0F) - scene.camera.position);
+        scene.update();
     }
 
     void render()
@@ -1093,10 +974,10 @@ namespace Engine
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
             // Bind scene descriptor set
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &sceneDataSet, 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
 
             // Render objects in scene
-            for (auto& object : objects)
+            for (auto& object : scene.objects)
             {
                 // Bind object descriptor set
                 vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &object.objectDataSet, 0, nullptr);
