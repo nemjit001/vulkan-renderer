@@ -17,6 +17,7 @@ struct UniformLightData
     __declspec(align(16)) glm::vec3 lightDirection;
     __declspec(align(16)) glm::vec3 lightColor;
     __declspec(align(16)) glm::vec3 ambient;
+    __declspec(align(16)) glm::mat4 lightSpaceTransform;
 };
 
 /// @brief Uniform per-object data.
@@ -254,6 +255,13 @@ void Scene::update()
     sceneDataBuffer.unmap();
 
     lightDataBuffer.map();
+    Camera lightCamera{};
+    lightCamera.type = CameraType::Orthographic;
+    lightCamera.ortho.xMag = shadowmapXMag;
+    lightCamera.ortho.yMag = shadowmapYMag;
+    lightCamera.ortho.zNear = 0.01F;
+    lightCamera.ortho.zFar = shadowmapDepth;
+
     UniformLightData lightData{};
     lightData.lightDirection = glm::normalize(glm::vec3{
         glm::cos(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
@@ -262,6 +270,7 @@ void Scene::update()
     });
     lightData.lightColor = sunColor;
     lightData.ambient = ambientLight;
+    lightData.lightSpaceTransform = lightCamera.matrix() * glm::lookAt(cameraTransform.position, cameraTransform.position - lightData.lightDirection, UP);
 
     assert(lightDataBuffer.mapped);
     memcpy(lightDataBuffer.pData, &lightData, sizeof(UniformLightData));

@@ -62,8 +62,8 @@ namespace Engine
     VkRect2D scissor{};
 
     // Scene data
-    VkDescriptorPool sceneDescriptorPool = VK_NULL_HANDLE;
-    VkDescriptorPool lightDescriptorPool = VK_NULL_HANDLE;
+    VkDescriptorPool sceneDataDescriptorPool = VK_NULL_HANDLE;
+    VkDescriptorPool lightDataDescriptorPool = VK_NULL_HANDLE;
     Scene scene{};
 
     bool init()
@@ -391,7 +391,7 @@ namespace Engine
             lightDataUniformBinding.binding = 0;
             lightDataUniformBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             lightDataUniformBinding.descriptorCount = 1;
-            lightDataUniformBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            lightDataUniformBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
             lightDataUniformBinding.pImmutableSamplers = nullptr;
 
             VkDescriptorSetLayoutBinding lightDataSetLayoutBindings[] = { lightDataUniformBinding };
@@ -723,13 +723,13 @@ namespace Engine
                 VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * maxSceneCount },
             };
 
-            VkDescriptorPoolCreateInfo sceneDescriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-            sceneDescriptorPoolCreateInfo.flags = 0;
-            sceneDescriptorPoolCreateInfo.maxSets = maxSceneCount;
-            sceneDescriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(scenePoolSizes);
-            sceneDescriptorPoolCreateInfo.pPoolSizes = scenePoolSizes;
+            VkDescriptorPoolCreateInfo sceneDataDescriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+            sceneDataDescriptorPoolCreateInfo.flags = 0;
+            sceneDataDescriptorPoolCreateInfo.maxSets = maxSceneCount;
+            sceneDataDescriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(scenePoolSizes);
+            sceneDataDescriptorPoolCreateInfo.pPoolSizes = scenePoolSizes;
 
-            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &sceneDescriptorPoolCreateInfo, nullptr, &sceneDescriptorPool)))
+            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &sceneDataDescriptorPoolCreateInfo, nullptr, &sceneDataDescriptorPool)))
             {
                 printf("Vulkan scene descriptor pool create failed\n");
                 return false;
@@ -739,20 +739,20 @@ namespace Engine
                 VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * maxLightCount },
             };
 
-            VkDescriptorPoolCreateInfo lightDescriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-            lightDescriptorPoolCreateInfo.flags = 0;
-            lightDescriptorPoolCreateInfo.maxSets = maxLightCount;
-            lightDescriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(lightPoolSizes);
-            lightDescriptorPoolCreateInfo.pPoolSizes = lightPoolSizes;
+            VkDescriptorPoolCreateInfo lightDataDescriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+            lightDataDescriptorPoolCreateInfo.flags = 0;
+            lightDataDescriptorPoolCreateInfo.maxSets = maxLightCount;
+            lightDataDescriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(lightPoolSizes);
+            lightDataDescriptorPoolCreateInfo.pPoolSizes = lightPoolSizes;
 
-            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &lightDescriptorPoolCreateInfo, nullptr, &lightDescriptorPool)))
+            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &lightDataDescriptorPoolCreateInfo, nullptr, &lightDataDescriptorPool)))
             {
                 printf("Vulkan light descriptor pool create failed\n");
                 return false;
             }
 
             VkDescriptorSetAllocateInfo sceneDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-            sceneDataSetAllocInfo.descriptorPool = sceneDescriptorPool;
+            sceneDataSetAllocInfo.descriptorPool = sceneDataDescriptorPool;
             sceneDataSetAllocInfo.descriptorSetCount = 1;
             sceneDataSetAllocInfo.pSetLayouts = &sceneDataSetLayout;
 
@@ -764,7 +764,7 @@ namespace Engine
             }
 
             VkDescriptorSetAllocateInfo lightDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-            lightDataSetAllocInfo.descriptorPool = lightDescriptorPool;
+            lightDataSetAllocInfo.descriptorPool = lightDataDescriptorPool;
             lightDataSetAllocInfo.descriptorSetCount = 1;
             lightDataSetAllocInfo.pSetLayouts = &lightDataSetLayout;
 
@@ -924,8 +924,8 @@ namespace Engine
 
         // Destroy scene data
         scene.destroy();
-        vkDestroyDescriptorPool(pDeviceContext->device, lightDescriptorPool, nullptr);
-        vkDestroyDescriptorPool(pDeviceContext->device, sceneDescriptorPool, nullptr);
+        vkDestroyDescriptorPool(pDeviceContext->device, lightDataDescriptorPool, nullptr);
+        vkDestroyDescriptorPool(pDeviceContext->device, sceneDataDescriptorPool, nullptr);
 
         // Destroy forward pipelines & associated data
         vkDestroyPipeline(pDeviceContext->device, forwardPipeline, nullptr);

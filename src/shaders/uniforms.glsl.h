@@ -10,6 +10,7 @@ layout(set = 1, binding = 0) uniform LIGHT_DATA_UNIFORM
 	vec3 lightDirection;
 	vec3 lightColor;
 	vec3 ambient;
+	mat4 lightSpaceTransform;
 };
 
 layout(set = 2, binding = 0) uniform OBJECT_DATA_UNIFORM

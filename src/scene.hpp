@@ -137,6 +137,9 @@ public:
     Transform cameraTransform{};
     Camera camera{};
 
+    float shadowmapXMag = 10.0F;
+    float shadowmapYMag = 10.0F;
+    float shadowmapDepth = 10.0F;
     float sunAzimuth = 0.0F;
     float sunZenith = 0.0F;
     glm::vec3 sunColor = glm::vec3(1.0F);
