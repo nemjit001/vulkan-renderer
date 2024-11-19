@@ -51,6 +51,7 @@ namespace Engine
     // Per pass data
     VkSampler textureSampler = VK_NULL_HANDLE;
     VkDescriptorSetLayout sceneDataSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout lightDataSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout objectDataSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     VkPipeline depthPrepassPipeline = VK_NULL_HANDLE;
@@ -60,6 +61,7 @@ namespace Engine
 
     // Scene data
     VkDescriptorPool sceneDescriptorPool = VK_NULL_HANDLE;
+    VkDescriptorPool lightDescriptorPool = VK_NULL_HANDLE;
     Scene scene{};
 
     bool init()
@@ -383,6 +385,25 @@ namespace Engine
                 return false;
             }
 
+            VkDescriptorSetLayoutBinding lightDataUniformBinding{};
+            lightDataUniformBinding.binding = 0;
+            lightDataUniformBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            lightDataUniformBinding.descriptorCount = 1;
+            lightDataUniformBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            lightDataUniformBinding.pImmutableSamplers = nullptr;
+
+            VkDescriptorSetLayoutBinding lightDataSetLayoutBindings[] = { lightDataUniformBinding };
+            VkDescriptorSetLayoutCreateInfo lightDataSetLayoutCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+            lightDataSetLayoutCreateInfo.flags = 0;
+            lightDataSetLayoutCreateInfo.bindingCount = SIZEOF_ARRAY(lightDataSetLayoutBindings);
+            lightDataSetLayoutCreateInfo.pBindings = lightDataSetLayoutBindings;
+
+            if (VK_FAILED(vkCreateDescriptorSetLayout(pDeviceContext->device, &lightDataSetLayoutCreateInfo, nullptr, &lightDataSetLayout)))
+            {
+                printf("Vulkan light descriptor set layout create failed\n");
+                return false;
+            }
+
             VkDescriptorSetLayoutBinding objectDataUniformBinding{};
             objectDataUniformBinding.binding = 0;
             objectDataUniformBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -419,7 +440,7 @@ namespace Engine
 
         // Create pipeline layout
         {
-            VkDescriptorSetLayout descriptorSetLayouts[] = { sceneDataSetLayout, objectDataSetLayout, };
+            VkDescriptorSetLayout descriptorSetLayouts[] = { sceneDataSetLayout, lightDataSetLayout, objectDataSetLayout, };
             VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
             pipelineLayoutCreateInfo.flags = 0;
             pipelineLayoutCreateInfo.setLayoutCount = SIZEOF_ARRAY(descriptorSetLayouts);
@@ -697,6 +718,7 @@ namespace Engine
         // Create scene data
         {
             uint32_t const maxSceneCount = 1;
+            uint32_t const maxLightCount = 1;
 
             VkDescriptorPoolSize scenePoolSizes[] = {
                 VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * maxSceneCount },
@@ -714,6 +736,22 @@ namespace Engine
                 return false;
             }
 
+            VkDescriptorPoolSize lightPoolSizes[] = {
+                VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * maxLightCount },
+            };
+
+            VkDescriptorPoolCreateInfo lightDescriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+            lightDescriptorPoolCreateInfo.flags = 0;
+            lightDescriptorPoolCreateInfo.maxSets = maxLightCount;
+            lightDescriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(lightPoolSizes);
+            lightDescriptorPoolCreateInfo.pPoolSizes = lightPoolSizes;
+
+            if (VK_FAILED(vkCreateDescriptorPool(pDeviceContext->device, &lightDescriptorPoolCreateInfo, nullptr, &lightDescriptorPool)))
+            {
+                printf("Vulkan light descriptor pool create failed\n");
+                return false;
+            }
+
             VkDescriptorSetAllocateInfo sceneDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
             sceneDataSetAllocInfo.descriptorPool = sceneDescriptorPool;
             sceneDataSetAllocInfo.descriptorSetCount = 1;
@@ -726,7 +764,19 @@ namespace Engine
                 return false;
             }
 
-            scene = Scene(pDeviceContext, sceneDataSet);
+            VkDescriptorSetAllocateInfo lightDataSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+            lightDataSetAllocInfo.descriptorPool = lightDescriptorPool;
+            lightDataSetAllocInfo.descriptorSetCount = 1;
+            lightDataSetAllocInfo.pSetLayouts = &lightDataSetLayout;
+
+            VkDescriptorSet lightDataSet = VK_NULL_HANDLE;
+            if (VK_FAILED(vkAllocateDescriptorSets(pDeviceContext->device, &lightDataSetAllocInfo, &lightDataSet)))
+            {
+                printf("Vulkan descriptor set allocation failed\n");
+                return false;
+            }
+
+            scene = Scene(pDeviceContext, sceneDataSet, lightDataSet);
             scene.cameraTransform.position = glm::vec3(0.0F, 0.0F, -5.0F);
             scene.camera.type = CameraType::Perspective;
             scene.camera.perspective.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
@@ -875,13 +925,16 @@ namespace Engine
 
         // Destroy scene data
         scene.destroy();
+        vkDestroyDescriptorPool(pDeviceContext->device, lightDescriptorPool, nullptr);
         vkDestroyDescriptorPool(pDeviceContext->device, sceneDescriptorPool, nullptr);
 
         // Destroy graphics pipeline & associated data
         vkDestroyPipeline(pDeviceContext->device, forwardPipeline, nullptr);
         vkDestroyPipeline(pDeviceContext->device, depthPrepassPipeline, nullptr);
         vkDestroyPipelineLayout(pDeviceContext->device, pipelineLayout, nullptr);
+
         vkDestroyDescriptorSetLayout(pDeviceContext->device, objectDataSetLayout, nullptr);
+        vkDestroyDescriptorSetLayout(pDeviceContext->device, lightDataSetLayout, nullptr);
         vkDestroyDescriptorSetLayout(pDeviceContext->device, sceneDataSetLayout, nullptr);
         vkDestroySampler(pDeviceContext->device, textureSampler, nullptr);
 
@@ -1154,12 +1207,13 @@ namespace Engine
 
                 // Bind scene descriptor set
                 vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
 
                 // Render objects in scene
                 for (auto& object : scene.objects)
                 {
                     // Bind object descriptor set
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &object.objectDataSet, 0, nullptr);
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
 
                     // Draw object mesh
                     VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
@@ -1176,12 +1230,13 @@ namespace Engine
 
                 // Bind scene descriptor set
                 vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
 
                 // Render objects in scene
                 for (auto& object : scene.objects)
                 {
                     // Bind object descriptor set
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &object.objectDataSet, 0, nullptr);
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
 
                     // Draw object mesh
                     VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
@@ -1194,8 +1249,8 @@ namespace Engine
 
             vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
 
-            // Draw GUI
-            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+                // Draw GUI
+                ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 
             vkCmdEndRenderPass(commandBuffer);
 

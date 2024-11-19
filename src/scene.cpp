@@ -7,19 +7,24 @@
 /// @brief Uniform scene data.
 struct UniformSceneData
 {
-    alignas(16) glm::vec3 sunDirection;
-    alignas(16) glm::vec3 sunColor;
-    alignas(16) glm::vec3 ambientLight;
-    alignas(16) glm::vec3 cameraPosition;
-    alignas(16) glm::mat4 viewproject;
+    __declspec(align(16)) glm::vec3 ambientLight;
+    __declspec(align(16)) glm::vec3 cameraPosition;
+    __declspec(align(16)) glm::mat4 viewproject;
+};
+
+/// @brief Uniform light data
+struct UniformLightData
+{
+    __declspec(align(16)) glm::vec3 lightDirection;
+    __declspec(align(16)) glm::vec3 lightColor;
 };
 
 /// @brief Uniform per-object data.
 struct UniformObjectData
 {
-    alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 normal;
-    alignas(4)  float specularity;
+    __declspec(align(16)) glm::mat4 model;
+    __declspec(align(16)) glm::mat4 normal;
+    __declspec(align(4))  float specularity;
 };
 
 glm::mat4 Transform::matrix() const
@@ -139,10 +144,11 @@ void Object::update()
     objectDataBuffer.unmap();
 }
 
-Scene::Scene(RenderDeviceContext* pDeviceContext, VkDescriptorSet sceneDataSet)
+Scene::Scene(RenderDeviceContext* pDeviceContext, VkDescriptorSet sceneDataSet, VkDescriptorSet lightDataSet)
     :
     pDeviceContext(pDeviceContext),
-    sceneDataSet(sceneDataSet)
+    sceneDataSet(sceneDataSet),
+    lightDataSet(lightDataSet)
 {
     // Set up object descriptor pool
     {
@@ -185,6 +191,29 @@ Scene::Scene(RenderDeviceContext* pDeviceContext, VkDescriptorSet sceneDataSet)
 
         vkUpdateDescriptorSets(pDeviceContext->device, 1, &sceneDataWrite, 0, nullptr);
     }
+
+    // Set up light uniform buffer
+    {
+        if (!pDeviceContext->createBuffer(lightDataBuffer, sizeof(UniformLightData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
+        {
+            throw std::runtime_error("Vulkan light data buffer create failed");
+        }
+
+        VkDescriptorBufferInfo lightDataBufferInfo{};
+        lightDataBufferInfo.buffer = lightDataBuffer.handle;
+        lightDataBufferInfo.offset = 0;
+        lightDataBufferInfo.range = lightDataBuffer.size;
+
+        VkWriteDescriptorSet lightDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        lightDataWrite.dstSet = lightDataSet;
+        lightDataWrite.dstBinding = 0;
+        lightDataWrite.dstArrayElement = 0;
+        lightDataWrite.descriptorCount = 1;
+        lightDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        lightDataWrite.pBufferInfo = &lightDataBufferInfo;
+
+        vkUpdateDescriptorSets(pDeviceContext->device, 1, &lightDataWrite, 0, nullptr);
+    }
 }
 
 void Scene::destroy()
@@ -205,6 +234,7 @@ void Scene::destroy()
         mesh.destroy();
     }
 
+    lightDataBuffer.destroy();
     sceneDataBuffer.destroy();
     vkDestroyDescriptorPool(pDeviceContext->device, objectDescriptorPool, nullptr);
 }
@@ -212,17 +242,10 @@ void Scene::destroy()
 void Scene::update()
 {
     sceneDataBuffer.map();
-
     glm::vec3 const camForward = glm::normalize(glm::vec3(cameraTransform.matrix() * glm::vec4(FORWARD, 0.0F)));
     glm::vec3 const camUp = glm::normalize(glm::vec3(cameraTransform.matrix() * glm::vec4(UP, 0.0F)));
 
     UniformSceneData sceneData{};
-    sceneData.sunDirection = glm::normalize(glm::vec3{
-        glm::cos(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
-        glm::cos(glm::radians(90.0F - sunZenith)),
-        glm::sin(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
-    });
-    sceneData.sunColor = sunColor;
     sceneData.ambientLight = ambientLight;
     sceneData.cameraPosition = cameraTransform.position;
     sceneData.viewproject = camera.matrix() * glm::lookAt(cameraTransform.position, cameraTransform.position + camForward, camUp);
@@ -230,6 +253,19 @@ void Scene::update()
     assert(sceneDataBuffer.mapped);
     memcpy(sceneDataBuffer.pData, &sceneData, sizeof(UniformSceneData));
     sceneDataBuffer.unmap();
+
+    lightDataBuffer.map();
+    UniformLightData lightData{};
+    lightData.lightDirection = glm::normalize(glm::vec3{
+        glm::cos(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
+        glm::cos(glm::radians(90.0F - sunZenith)),
+        glm::sin(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
+    });
+    lightData.lightColor = sunColor;
+
+    assert(lightDataBuffer.mapped);
+    memcpy(lightDataBuffer.pData, &lightData, sizeof(UniformLightData));
+    lightDataBuffer.unmap();
 
     // Update object data in scene
     for (auto& object : objects) {

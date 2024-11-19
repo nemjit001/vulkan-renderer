@@ -113,7 +113,7 @@ class Scene
 public:
     Scene() = default;
 
-    Scene(RenderDeviceContext* pDeviceContext, VkDescriptorSet sceneDataSet);
+    Scene(RenderDeviceContext* pDeviceContext, VkDescriptorSet sceneDataSet, VkDescriptorSet lightDataSet);
 
     void destroy();
 
@@ -124,9 +124,11 @@ public:
 
     RenderDeviceContext* pDeviceContext = nullptr;
     VkDescriptorSet sceneDataSet = VK_NULL_HANDLE;
+    VkDescriptorSet lightDataSet = VK_NULL_HANDLE;
 
     VkDescriptorPool objectDescriptorPool = VK_NULL_HANDLE;
     Buffer sceneDataBuffer{};
+    Buffer lightDataBuffer{};
 
     std::vector<Mesh> meshes{};
     std::vector<Texture> textures{};
