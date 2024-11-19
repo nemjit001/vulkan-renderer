@@ -175,7 +175,7 @@ namespace Engine
             depthStencilAttachment.format = VK_FORMAT_D32_SFLOAT;
             depthStencilAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
             depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-            depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
             depthStencilAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
             depthStencilAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
             depthStencilAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -349,8 +349,8 @@ namespace Engine
             samplerCreateInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
             samplerCreateInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
             samplerCreateInfo.mipLodBias = 0.0F;
-            samplerCreateInfo.anisotropyEnable = VK_FALSE;
-            samplerCreateInfo.maxAnisotropy = 0.0F;
+            samplerCreateInfo.anisotropyEnable = VK_TRUE;
+            samplerCreateInfo.maxAnisotropy = 16.0F; // TODO(nemjit001): query max from device.
             samplerCreateInfo.compareEnable = VK_FALSE;
             samplerCreateInfo.compareOp = VK_COMPARE_OP_ALWAYS;
             samplerCreateInfo.minLod = 0.0F;
