@@ -134,12 +134,13 @@ public:
     std::vector<Texture> textures{};
     std::vector<VkImageView> textureViews{};
 
+    Transform cameraTransform{};
+    Camera camera{};
+
     float sunAzimuth = 0.0F;
     float sunZenith = 0.0F;
     glm::vec3 sunColor = glm::vec3(1.0F);
     glm::vec3 ambientLight = glm::vec3(0.1F);
-    Transform cameraTransform{};
-    Camera camera{};
 
     std::vector<Object> objects{};
 };

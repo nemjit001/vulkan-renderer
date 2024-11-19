@@ -30,10 +30,10 @@ void main()
 	float NoL = clamp(dot(N, L), 0.0, 1.0);
     float NoH = clamp(dot(N, H), 0.0, 1.0);
 
-	vec3 ambient = ambientLight * color;
-    vec3 diffuse = NoL * color * lightColor;
-    vec3 specular = pow(NoH, 64.0) * lightColor;
-    vec3 outColor = ambient + diffuse + specularity * specular;
+	vec3 ambientComponent = ambient * color;
+    vec3 diffuseComponent = NoL * color * lightColor;
+    vec3 specularComponent = specularity * pow(NoH, 64.0) * lightColor;
+    vec3 outColor = ambientComponent + diffuseComponent + specularComponent;
 
 	out_FragColor = vec4(outColor, 1);
 }

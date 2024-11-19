@@ -48,12 +48,14 @@ namespace Engine
     // GUI data
     VkDescriptorPool imguiDescriptorPool = VK_NULL_HANDLE; //< descriptor pool specifically for ImGui usage
 
-    // Per pass data
+    // Pipeline layout data
     VkSampler textureSampler = VK_NULL_HANDLE;
     VkDescriptorSetLayout sceneDataSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout lightDataSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout objectDataSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+
+    // Forward pipeline data
+    VkPipelineLayout forwardPipelineLayout = VK_NULL_HANDLE;
     VkPipeline depthPrepassPipeline = VK_NULL_HANDLE;
     VkPipeline forwardPipeline = VK_NULL_HANDLE;
     VkViewport viewport{};
@@ -438,7 +440,7 @@ namespace Engine
             }
         }
 
-        // Create pipeline layout
+        // Create forward pipeline layout & pipelines
         {
             VkDescriptorSetLayout descriptorSetLayouts[] = { sceneDataSetLayout, lightDataSetLayout, objectDataSetLayout, };
             VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -448,15 +450,12 @@ namespace Engine
             pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
             pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
-            if (VK_FAILED(vkCreatePipelineLayout(pDeviceContext->device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout)))
+            if (VK_FAILED(vkCreatePipelineLayout(pDeviceContext->device, &pipelineLayoutCreateInfo, nullptr, &forwardPipelineLayout)))
             {
                 printf("Vulkan pipeline layout create failed\n");
                 return false;
             }
-        }
 
-        // Create graphics pipelines
-        {
             std::vector<uint32_t> vertexShaderCode;
             if (!readShaderFile("static.vert.spv", vertexShaderCode))
             {
@@ -672,7 +671,7 @@ namespace Engine
             depthPrepassPipelineCreateInfo.pDepthStencilState = &depthStencilStateWrite;
             depthPrepassPipelineCreateInfo.pColorBlendState = nullptr;
             depthPrepassPipelineCreateInfo.pDynamicState = &dynamicState;
-            depthPrepassPipelineCreateInfo.layout = pipelineLayout;
+            depthPrepassPipelineCreateInfo.layout = forwardPipelineLayout;
             depthPrepassPipelineCreateInfo.renderPass = renderPass;
             depthPrepassPipelineCreateInfo.subpass = 0;
             depthPrepassPipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
@@ -698,7 +697,7 @@ namespace Engine
             forwardPipelineCreateInfo.pDepthStencilState = &depthStencilStateCompare;
             forwardPipelineCreateInfo.pColorBlendState = &colorBlendState;
             forwardPipelineCreateInfo.pDynamicState = &dynamicState;
-            forwardPipelineCreateInfo.layout = pipelineLayout;
+            forwardPipelineCreateInfo.layout = forwardPipelineLayout;
             forwardPipelineCreateInfo.renderPass = renderPass;
             forwardPipelineCreateInfo.subpass = 1;
             forwardPipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
@@ -928,11 +927,12 @@ namespace Engine
         vkDestroyDescriptorPool(pDeviceContext->device, lightDescriptorPool, nullptr);
         vkDestroyDescriptorPool(pDeviceContext->device, sceneDescriptorPool, nullptr);
 
-        // Destroy graphics pipeline & associated data
+        // Destroy forward pipelines & associated data
         vkDestroyPipeline(pDeviceContext->device, forwardPipeline, nullptr);
         vkDestroyPipeline(pDeviceContext->device, depthPrepassPipeline, nullptr);
-        vkDestroyPipelineLayout(pDeviceContext->device, pipelineLayout, nullptr);
+        vkDestroyPipelineLayout(pDeviceContext->device, forwardPipelineLayout, nullptr);
 
+        // Destroy pipeline layouts
         vkDestroyDescriptorSetLayout(pDeviceContext->device, objectDataSetLayout, nullptr);
         vkDestroyDescriptorSetLayout(pDeviceContext->device, lightDataSetLayout, nullptr);
         vkDestroyDescriptorSetLayout(pDeviceContext->device, sceneDataSetLayout, nullptr);
@@ -1206,14 +1206,14 @@ namespace Engine
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPrepassPipeline);
 
                 // Bind scene descriptor set
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
 
                 // Render objects in scene
                 for (auto& object : scene.objects)
                 {
                     // Bind object descriptor set
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
 
                     // Draw object mesh
                     VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
@@ -1229,14 +1229,14 @@ namespace Engine
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipeline);
 
                 // Bind scene descriptor set
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
 
                 // Render objects in scene
                 for (auto& object : scene.objects)
                 {
                     // Bind object descriptor set
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
 
                     // Draw object mesh
                     VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };

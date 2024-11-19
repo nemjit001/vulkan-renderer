@@ -12,7 +12,7 @@ function(target_enable_warnings_as_errors TARGET_NAME)
 endfunction()
 
 
-function(target_compile_shaders TARGET_NAME TARGET_SHADER_SOURCES)
+function(target_compile_shaders TARGET_NAME TARGET_SHADER_SOURCES TARGET_SHADER_HEADERS)
 	foreach(SHADER_SOURCE IN LISTS TARGET_SHADER_SOURCES)
 		message(STATUS "${TARGET_NAME}: found shader file ${SHADER_SOURCE}")
 		get_filename_component(SHADER_NAME ${SHADER_SOURCE} NAME_WLE)
@@ -29,7 +29,7 @@ function(target_compile_shaders TARGET_NAME TARGET_SHADER_SOURCES)
 		add_custom_target(${SHADER_NAME} ALL
 			COMMAND ${CMAKE_COMMAND} -E copy "${SHADER_OUTPUT_FILE}" "$<TARGET_FILE_DIR:${TARGET_NAME}>"
 			COMMENT "Copy ${SHADER_OUTPUT_FILE} -> $<TARGET_FILE_DIR:${TARGET_NAME}>"
-			DEPENDS ${SHADER_OUTPUT_FILE}
+			DEPENDS ${SHADER_OUTPUT_FILE} ${TARGET_SHADER_HEADERS}
 		)
 
 		list(APPEND ${TARGET_NAME}_SHADER_SOURCES ${SHADER_OUTPUT_FILE})

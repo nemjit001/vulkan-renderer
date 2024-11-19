@@ -7,7 +7,6 @@
 /// @brief Uniform scene data.
 struct UniformSceneData
 {
-    __declspec(align(16)) glm::vec3 ambientLight;
     __declspec(align(16)) glm::vec3 cameraPosition;
     __declspec(align(16)) glm::mat4 viewproject;
 };
@@ -17,6 +16,7 @@ struct UniformLightData
 {
     __declspec(align(16)) glm::vec3 lightDirection;
     __declspec(align(16)) glm::vec3 lightColor;
+    __declspec(align(16)) glm::vec3 ambient;
 };
 
 /// @brief Uniform per-object data.
@@ -246,7 +246,6 @@ void Scene::update()
     glm::vec3 const camUp = glm::normalize(glm::vec3(cameraTransform.matrix() * glm::vec4(UP, 0.0F)));
 
     UniformSceneData sceneData{};
-    sceneData.ambientLight = ambientLight;
     sceneData.cameraPosition = cameraTransform.position;
     sceneData.viewproject = camera.matrix() * glm::lookAt(cameraTransform.position, cameraTransform.position + camForward, camUp);
 
@@ -262,6 +261,7 @@ void Scene::update()
         glm::sin(glm::radians(sunAzimuth)) * glm::sin(glm::radians(90.0F - sunZenith)),
     });
     lightData.lightColor = sunColor;
+    lightData.ambient = ambientLight;
 
     assert(lightDataBuffer.mapped);
     memcpy(lightDataBuffer.pData, &lightData, sizeof(UniformLightData));
