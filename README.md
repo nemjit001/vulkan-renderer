@@ -19,8 +19,10 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 - [ ] Lights
 	- [ ] Sun light (directional, cascaded shadow mapping)
 	- [ ] Point lights
-- [ ] PBR pipeline
-- [ ] Transparency pass
+- [ ] Render pipeline
+	- [X] Depth prepass
+	- [ ] PBR materials
+	- [ ] Transparency pass
 - [ ] Animations
 	- [ ] Linear skinning
 	- [ ] Blend shapes

@@ -53,7 +53,8 @@ namespace Engine
     VkDescriptorSetLayout sceneDataSetLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout objectDataSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+    VkPipeline depthPrepassPipeline = VK_NULL_HANDLE;
+    VkPipeline forwardPipeline = VK_NULL_HANDLE;
     VkViewport viewport{};
     VkRect2D scissor{};
 
@@ -180,35 +181,81 @@ namespace Engine
             depthStencilAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             depthStencilAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-            VkAttachmentReference colorAttachmentRefs[] = {
+            VkAttachmentReference depthPrepassDepthStencilAttachment{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+
+            VkSubpassDescription depthPrepass{};
+            depthPrepass.flags = 0;
+            depthPrepass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+            depthPrepass.inputAttachmentCount = 0;
+            depthPrepass.pInputAttachments = nullptr;
+            depthPrepass.colorAttachmentCount = 0;
+            depthPrepass.pColorAttachments = nullptr;
+            depthPrepass.pResolveAttachments = nullptr;
+            depthPrepass.pDepthStencilAttachment = &depthPrepassDepthStencilAttachment;
+            depthPrepass.preserveAttachmentCount = 0;
+            depthPrepass.pPreserveAttachments = nullptr;
+
+            VkAttachmentReference forwardPassColorAttachments[] = {
                 VkAttachmentReference{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
             };
 
-            VkAttachmentReference depthStencilAttachmentRef{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+            VkAttachmentReference forwardPassDepthStencilAttachment{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
 
             VkSubpassDescription forwardPass{};
             forwardPass.flags = 0;
             forwardPass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
             forwardPass.inputAttachmentCount = 0;
             forwardPass.pInputAttachments = nullptr;
-            forwardPass.colorAttachmentCount = SIZEOF_ARRAY(colorAttachmentRefs);
-            forwardPass.pColorAttachments = colorAttachmentRefs;
+            forwardPass.colorAttachmentCount = SIZEOF_ARRAY(forwardPassColorAttachments);
+            forwardPass.pColorAttachments = forwardPassColorAttachments;
             forwardPass.pResolveAttachments = nullptr;
-            forwardPass.pDepthStencilAttachment = &depthStencilAttachmentRef;
+            forwardPass.pDepthStencilAttachment = &forwardPassDepthStencilAttachment;
             forwardPass.preserveAttachmentCount = 0;
             forwardPass.pPreserveAttachments = nullptr;
+
+            VkAttachmentReference GUIPassColorAttachments[] = {
+                VkAttachmentReference{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
+            };
+
+            VkSubpassDescription GUIPass{};
+            GUIPass.flags = 0;
+            GUIPass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+            GUIPass.inputAttachmentCount = 0;
+            GUIPass.pInputAttachments = nullptr;
+            GUIPass.colorAttachmentCount = SIZEOF_ARRAY(GUIPassColorAttachments);
+            GUIPass.pColorAttachments = GUIPassColorAttachments;
+            GUIPass.pResolveAttachments = nullptr;
+            GUIPass.pDepthStencilAttachment = nullptr;
+            GUIPass.preserveAttachmentCount = 0;
+            GUIPass.pPreserveAttachments = nullptr;
 
             VkSubpassDependency previousFrameDependency{};
             previousFrameDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
             previousFrameDependency.dstSubpass = 0;
-            previousFrameDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+            previousFrameDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
             previousFrameDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            previousFrameDependency.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+            previousFrameDependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
             previousFrameDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
 
+            VkSubpassDependency depthPrepassDependency{};
+            depthPrepassDependency.srcSubpass = 0;
+            depthPrepassDependency.dstSubpass = 1;
+            depthPrepassDependency.srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+            depthPrepassDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+            depthPrepassDependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            depthPrepassDependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+
+            VkSubpassDependency GUIPassDependency{};
+            GUIPassDependency.srcSubpass = 1;
+            GUIPassDependency.dstSubpass = 2;
+            GUIPassDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            GUIPassDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            GUIPassDependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            GUIPassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
             VkAttachmentDescription attachments[] = { colorAttachment, depthStencilAttachment, };
-            VkSubpassDescription subpasses[] = { forwardPass, };
-            VkSubpassDependency dependencies[] = { previousFrameDependency, };
+            VkSubpassDescription subpasses[] = { depthPrepass, forwardPass, GUIPass, };
+            VkSubpassDependency dependencies[] = { previousFrameDependency, depthPrepassDependency, GUIPassDependency, };
             VkRenderPassCreateInfo renderPassCreateInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
             renderPassCreateInfo.flags = 0;
             renderPassCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
@@ -278,7 +325,7 @@ namespace Engine
             initInfo.ImageCount = pDeviceContext->backbufferCount();
             initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
             initInfo.PipelineCache = VK_NULL_HANDLE;
-            initInfo.Subpass = 0;
+            initInfo.Subpass = 2;
             initInfo.UseDynamicRendering = false;
             initInfo.Allocator = nullptr;
 
@@ -291,7 +338,7 @@ namespace Engine
             }
         }
 
-        // Create samplers, descriptor set layouts, pipeline layout, and graphics pipeline
+        // Create samplers and descriptor set layouts
         {
             VkSamplerCreateInfo samplerCreateInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
             samplerCreateInfo.flags = 0;
@@ -368,7 +415,10 @@ namespace Engine
                 printf("Vulkan scene descriptor set layout create failed\n");
                 return false;
             }
+        }
 
+        // Create pipeline layout
+        {
             VkDescriptorSetLayout descriptorSetLayouts[] = { sceneDataSetLayout, objectDataSetLayout, };
             VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
             pipelineLayoutCreateInfo.flags = 0;
@@ -382,7 +432,10 @@ namespace Engine
                 printf("Vulkan pipeline layout create failed\n");
                 return false;
             }
+        }
 
+        // Create graphics pipelines
+        {
             std::vector<uint32_t> vertexShaderCode;
             if (!readShaderFile("static.vert.spv", vertexShaderCode))
             {
@@ -402,22 +455,41 @@ namespace Engine
                 return false;
             }
 
-            std::vector<uint32_t> fragmentShaderCode;
-            if (!readShaderFile("forward.frag.spv", fragmentShaderCode))
+            std::vector<uint32_t> forwardFragmentShaderCode;
+            if (!readShaderFile("forward.frag.spv", forwardFragmentShaderCode))
             {
-                printf("VK Renderer fragment shader read failed\n");
+                printf("VK Renderer forward fragment shader read failed\n");
                 return false;
             }
 
-            VkShaderModuleCreateInfo fragmentShaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-            fragmentShaderCreateInfo.flags = 0;
-            fragmentShaderCreateInfo.codeSize = static_cast<uint32_t>(fragmentShaderCode.size() * sizeof(uint32_t));
-            fragmentShaderCreateInfo.pCode = fragmentShaderCode.data();
+            VkShaderModuleCreateInfo forwardFragmentShaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+            forwardFragmentShaderCreateInfo.flags = 0;
+            forwardFragmentShaderCreateInfo.codeSize = static_cast<uint32_t>(forwardFragmentShaderCode.size() * sizeof(uint32_t));
+            forwardFragmentShaderCreateInfo.pCode = forwardFragmentShaderCode.data();
 
-            VkShaderModule fragmentShader = VK_NULL_HANDLE;
-            if (VK_FAILED(vkCreateShaderModule(pDeviceContext->device, &fragmentShaderCreateInfo, nullptr, &fragmentShader)))
+            VkShaderModule forwardFragmentShader = VK_NULL_HANDLE;
+            if (VK_FAILED(vkCreateShaderModule(pDeviceContext->device, &forwardFragmentShaderCreateInfo, nullptr, &forwardFragmentShader)))
             {
-                printf("Vulkan vertex shader create failed\n");
+                printf("Vulkan forward fragment shader create failed\n");
+                return false;
+            }
+
+            std::vector<uint32_t> depthOnlyFragmentShaderCode;
+            if (!readShaderFile("depth_only.frag.spv", depthOnlyFragmentShaderCode))
+            {
+                printf("VK Renderer depth only fragment shader read failed\n");
+                return false;
+            }
+
+            VkShaderModuleCreateInfo depthOnlyFragmentShaderCreateInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+            depthOnlyFragmentShaderCreateInfo.flags = 0;
+            depthOnlyFragmentShaderCreateInfo.codeSize = static_cast<uint32_t>(depthOnlyFragmentShaderCode.size() * sizeof(uint32_t));
+            depthOnlyFragmentShaderCreateInfo.pCode = depthOnlyFragmentShaderCode.data();
+
+            VkShaderModule depthOnlyFragmentShader = VK_NULL_HANDLE;
+            if (VK_FAILED(vkCreateShaderModule(pDeviceContext->device, &depthOnlyFragmentShaderCreateInfo, nullptr, &depthOnlyFragmentShader)))
+            {
+                printf("Vulkan depth only fragment shader create failed\n");
                 return false;
             }
 
@@ -428,12 +500,19 @@ namespace Engine
             vertexStageInfo.pName = "main";
             vertexStageInfo.pSpecializationInfo = nullptr;
 
-            VkPipelineShaderStageCreateInfo fragmentStageInfo{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
-            fragmentStageInfo.flags = 0;
-            fragmentStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-            fragmentStageInfo.module = fragmentShader;
-            fragmentStageInfo.pName = "main";
-            fragmentStageInfo.pSpecializationInfo = nullptr;
+            VkPipelineShaderStageCreateInfo forwardFragmentStageInfo{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+            forwardFragmentStageInfo.flags = 0;
+            forwardFragmentStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+            forwardFragmentStageInfo.module = forwardFragmentShader;
+            forwardFragmentStageInfo.pName = "main";
+            forwardFragmentStageInfo.pSpecializationInfo = nullptr;
+
+            VkPipelineShaderStageCreateInfo depthOnlyFragmentStageInfo{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+            depthOnlyFragmentStageInfo.flags = 0;
+            depthOnlyFragmentStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+            depthOnlyFragmentStageInfo.module = depthOnlyFragmentShader;
+            depthOnlyFragmentStageInfo.pName = "main";
+            depthOnlyFragmentStageInfo.pSpecializationInfo = nullptr;
 
             VkVertexInputBindingDescription vertexBindings[] = {
                 VkVertexInputBindingDescription{ 0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX }
@@ -493,19 +572,33 @@ namespace Engine
             multisampleState.alphaToCoverageEnable = VK_FALSE;
             multisampleState.alphaToOneEnable = VK_FALSE;
 
-            VkPipelineDepthStencilStateCreateInfo depthStencilState{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
-            depthStencilState.flags = 0;
-            depthStencilState.depthTestEnable = VK_TRUE;
-            depthStencilState.depthWriteEnable = VK_TRUE;
-            depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS;
-            depthStencilState.depthBoundsTestEnable = VK_TRUE;
-            depthStencilState.stencilTestEnable = VK_FALSE;
-            depthStencilState.front =
+            VkPipelineDepthStencilStateCreateInfo depthStencilStateWrite{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+            depthStencilStateWrite.flags = 0;
+            depthStencilStateWrite.depthTestEnable = VK_TRUE;
+            depthStencilStateWrite.depthWriteEnable = VK_TRUE;
+            depthStencilStateWrite.depthCompareOp = VK_COMPARE_OP_LESS;
+            depthStencilStateWrite.depthBoundsTestEnable = VK_TRUE;
+            depthStencilStateWrite.stencilTestEnable = VK_FALSE;
+            depthStencilStateWrite.front =
                 VkStencilOpState{ VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, UINT32_MAX, UINT32_MAX, UINT32_MAX };
-            depthStencilState.back =
+            depthStencilStateWrite.back =
                 VkStencilOpState{ VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, UINT32_MAX, UINT32_MAX, UINT32_MAX };
-            depthStencilState.minDepthBounds = 0.0F;
-            depthStencilState.maxDepthBounds = 1.0F;
+            depthStencilStateWrite.minDepthBounds = 0.0F;
+            depthStencilStateWrite.maxDepthBounds = 1.0F;
+
+            VkPipelineDepthStencilStateCreateInfo depthStencilStateCompare{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+            depthStencilStateCompare.flags = 0;
+            depthStencilStateCompare.depthTestEnable = VK_TRUE;
+            depthStencilStateCompare.depthWriteEnable = VK_FALSE;
+            depthStencilStateCompare.depthCompareOp = VK_COMPARE_OP_EQUAL;
+            depthStencilStateCompare.depthBoundsTestEnable = VK_FALSE;
+            depthStencilStateCompare.stencilTestEnable = VK_FALSE;
+            depthStencilStateCompare.front =
+                VkStencilOpState{ VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, UINT32_MAX, UINT32_MAX, UINT32_MAX };
+            depthStencilStateCompare.back =
+                VkStencilOpState{ VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, UINT32_MAX, UINT32_MAX, UINT32_MAX };
+            depthStencilStateCompare.minDepthBounds = 0.0F;
+            depthStencilStateCompare.maxDepthBounds = 0.0F;
 
             VkPipelineColorBlendAttachmentState colorBlendAttachments[] = {
                 VkPipelineColorBlendAttachmentState{
@@ -544,33 +637,60 @@ namespace Engine
             dynamicState.dynamicStateCount = SIZEOF_ARRAY(dynamicStates);
             dynamicState.pDynamicStates = dynamicStates;
 
-            VkPipelineShaderStageCreateInfo shaderStages[] = { vertexStageInfo, fragmentStageInfo, };
-            VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
-            graphicsPipelineCreateInfo.flags = 0;
-            graphicsPipelineCreateInfo.stageCount = SIZEOF_ARRAY(shaderStages);
-            graphicsPipelineCreateInfo.pStages = shaderStages;
-            graphicsPipelineCreateInfo.pVertexInputState = &vertexInputState;
-            graphicsPipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
-            graphicsPipelineCreateInfo.pTessellationState = nullptr;
-            graphicsPipelineCreateInfo.pViewportState = &viewportState;
-            graphicsPipelineCreateInfo.pRasterizationState = &rasterizationState;
-            graphicsPipelineCreateInfo.pMultisampleState = &multisampleState;
-            graphicsPipelineCreateInfo.pDepthStencilState = &depthStencilState;
-            graphicsPipelineCreateInfo.pColorBlendState = &colorBlendState;
-            graphicsPipelineCreateInfo.pDynamicState = &dynamicState;
-            graphicsPipelineCreateInfo.layout = pipelineLayout;
-            graphicsPipelineCreateInfo.renderPass = renderPass;
-            graphicsPipelineCreateInfo.subpass = 0;
-            graphicsPipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
-            graphicsPipelineCreateInfo.basePipelineIndex = 0;
+            VkPipelineShaderStageCreateInfo depthPrepassShaderStages[] = { vertexStageInfo, depthOnlyFragmentStageInfo, };
+            VkGraphicsPipelineCreateInfo depthPrepassPipelineCreateInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+            depthPrepassPipelineCreateInfo.flags = 0;
+            depthPrepassPipelineCreateInfo.stageCount = SIZEOF_ARRAY(depthPrepassShaderStages);
+            depthPrepassPipelineCreateInfo.pStages = depthPrepassShaderStages;
+            depthPrepassPipelineCreateInfo.pVertexInputState = &vertexInputState;
+            depthPrepassPipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
+            depthPrepassPipelineCreateInfo.pTessellationState = nullptr;
+            depthPrepassPipelineCreateInfo.pViewportState = &viewportState;
+            depthPrepassPipelineCreateInfo.pRasterizationState = &rasterizationState;
+            depthPrepassPipelineCreateInfo.pMultisampleState = &multisampleState;
+            depthPrepassPipelineCreateInfo.pDepthStencilState = &depthStencilStateWrite;
+            depthPrepassPipelineCreateInfo.pColorBlendState = nullptr;
+            depthPrepassPipelineCreateInfo.pDynamicState = &dynamicState;
+            depthPrepassPipelineCreateInfo.layout = pipelineLayout;
+            depthPrepassPipelineCreateInfo.renderPass = renderPass;
+            depthPrepassPipelineCreateInfo.subpass = 0;
+            depthPrepassPipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
+            depthPrepassPipelineCreateInfo.basePipelineIndex = 0;
 
-            if (VK_FAILED(vkCreateGraphicsPipelines(pDeviceContext->device, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, nullptr, &graphicsPipeline)))
+            if (VK_FAILED(vkCreateGraphicsPipelines(pDeviceContext->device, VK_NULL_HANDLE, 1, &depthPrepassPipelineCreateInfo, nullptr, &depthPrepassPipeline)))
             {
-                printf("Vulkan graphics pipeline create failed\n");
+                printf("Vulkan depth prepass pipeline create failed\n");
                 return false;
             }
 
-            vkDestroyShaderModule(pDeviceContext->device, fragmentShader, nullptr);
+            VkPipelineShaderStageCreateInfo shaderStages[] = { vertexStageInfo, forwardFragmentStageInfo, };
+            VkGraphicsPipelineCreateInfo forwardPipelineCreateInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+            forwardPipelineCreateInfo.flags = 0;
+            forwardPipelineCreateInfo.stageCount = SIZEOF_ARRAY(shaderStages);
+            forwardPipelineCreateInfo.pStages = shaderStages;
+            forwardPipelineCreateInfo.pVertexInputState = &vertexInputState;
+            forwardPipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
+            forwardPipelineCreateInfo.pTessellationState = nullptr;
+            forwardPipelineCreateInfo.pViewportState = &viewportState;
+            forwardPipelineCreateInfo.pRasterizationState = &rasterizationState;
+            forwardPipelineCreateInfo.pMultisampleState = &multisampleState;
+            forwardPipelineCreateInfo.pDepthStencilState = &depthStencilStateCompare;
+            forwardPipelineCreateInfo.pColorBlendState = &colorBlendState;
+            forwardPipelineCreateInfo.pDynamicState = &dynamicState;
+            forwardPipelineCreateInfo.layout = pipelineLayout;
+            forwardPipelineCreateInfo.renderPass = renderPass;
+            forwardPipelineCreateInfo.subpass = 1;
+            forwardPipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
+            forwardPipelineCreateInfo.basePipelineIndex = 0;
+
+            if (VK_FAILED(vkCreateGraphicsPipelines(pDeviceContext->device, VK_NULL_HANDLE, 1, &forwardPipelineCreateInfo, nullptr, &forwardPipeline)))
+            {
+                printf("Vulkan forward pipeline create failed\n");
+                return false;
+            }
+
+            vkDestroyShaderModule(pDeviceContext->device, depthOnlyFragmentShader, nullptr);
+            vkDestroyShaderModule(pDeviceContext->device, forwardFragmentShader, nullptr);
             vkDestroyShaderModule(pDeviceContext->device, vertexShader, nullptr);
         }
 
@@ -758,7 +878,8 @@ namespace Engine
         vkDestroyDescriptorPool(pDeviceContext->device, sceneDescriptorPool, nullptr);
 
         // Destroy graphics pipeline & associated data
-        vkDestroyPipeline(pDeviceContext->device, graphicsPipeline, nullptr);
+        vkDestroyPipeline(pDeviceContext->device, forwardPipeline, nullptr);
+        vkDestroyPipeline(pDeviceContext->device, depthPrepassPipeline, nullptr);
         vkDestroyPipelineLayout(pDeviceContext->device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(pDeviceContext->device, objectDataSetLayout, nullptr);
         vkDestroyDescriptorSetLayout(pDeviceContext->device, sceneDataSetLayout, nullptr);
@@ -1025,27 +1146,53 @@ namespace Engine
 
             vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-            // Bind graphics pipeline
             vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+                
+                // Bind depth prepass pipeline
+                vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPrepassPipeline);
 
-            // Bind scene descriptor set
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
+                // Bind scene descriptor set
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
 
-            // Render objects in scene
-            for (auto& object : scene.objects)
-            {
-                // Bind object descriptor set
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &object.objectDataSet, 0, nullptr);
+                // Render objects in scene
+                for (auto& object : scene.objects)
+                {
+                    // Bind object descriptor set
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &object.objectDataSet, 0, nullptr);
 
-                // Draw object mesh
-                VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
-                VkDeviceSize offsets[] = { 0, };
-                vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-                vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
-            }
+                    // Draw object mesh
+                    VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
+                    VkDeviceSize offsets[] = { 0, };
+                    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                    vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
+                }
+
+            vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
+
+                // Bind forward pipeline
+                vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipeline);
+
+                // Bind scene descriptor set
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
+
+                // Render objects in scene
+                for (auto& object : scene.objects)
+                {
+                    // Bind object descriptor set
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &object.objectDataSet, 0, nullptr);
+
+                    // Draw object mesh
+                    VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
+                    VkDeviceSize offsets[] = { 0, };
+                    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                    vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
+                }
+
+
+            vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
 
             // Draw GUI
             ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
