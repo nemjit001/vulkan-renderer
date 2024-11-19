@@ -495,7 +495,7 @@ namespace Engine
             }
 
             std::vector<uint32_t> depthOnlyFragmentShaderCode;
-            if (!readShaderFile("depth_only.frag.spv", depthOnlyFragmentShaderCode))
+            if (!readShaderFile("depth_prepass.frag.spv", depthOnlyFragmentShaderCode))
             {
                 printf("VK Renderer depth only fragment shader read failed\n");
                 return false;
@@ -1184,75 +1184,80 @@ namespace Engine
                 return;
             }
 
-            // Begin render pass
-            VkClearValue clearValues[] = {
-                VkClearValue{{ 0.1F, 0.1F, 0.1F, 1.0F }},
-                VkClearValue{{ 1.0F, 0x00 }},
-            };
+            // TODO(nemjit001): Execute shadowmapping pass here.
+            // Begin forward render pass
+            {
+                VkClearValue clearValues[] = {
+                    VkClearValue{{ 0.1F, 0.1F, 0.1F, 1.0F }},
+                    VkClearValue{{ 1.0F, 0x00 }},
+                };
 
-            VkRenderPassBeginInfo renderPassBeginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-            renderPassBeginInfo.renderPass = renderPass;
-            renderPassBeginInfo.framebuffer = framebuffers[backbufferIndex];
-            renderPassBeginInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight } };
-            renderPassBeginInfo.clearValueCount = SIZEOF_ARRAY(clearValues);
-            renderPassBeginInfo.pClearValues = clearValues;
+                VkRenderPassBeginInfo renderPassBeginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+                renderPassBeginInfo.renderPass = renderPass;
+                renderPassBeginInfo.framebuffer = framebuffers[backbufferIndex];
+                renderPassBeginInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight } };
+                renderPassBeginInfo.clearValueCount = SIZEOF_ARRAY(clearValues);
+                renderPassBeginInfo.pClearValues = clearValues;
 
-            vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+                vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+                vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+                vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-                
-                // Bind depth prepass pipeline
-                vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPrepassPipeline);
-
-                // Bind scene descriptor set
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
-
-                // Render objects in scene
-                for (auto& object : scene.objects)
+                // Depth prepass
                 {
-                    // Bind object descriptor set
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
+                    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPrepassPipeline);
 
-                    // Draw object mesh
-                    VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
-                    VkDeviceSize offsets[] = { 0, };
-                    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-                    vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
+                    // Bind scene descriptor set
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
+
+                    // Render objects in scene
+                    for (auto& object : scene.objects)
+                    {
+                        // Bind object descriptor set
+                        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
+
+                        // Draw object mesh
+                        VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
+                        VkDeviceSize offsets[] = { 0, };
+                        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                        vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+                        vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
+                    }
+
+                    vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
                 }
 
-            vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
-
-                // Bind forward pipeline
-                vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipeline);
-
-                // Bind scene descriptor set
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
-
-                // Render objects in scene
-                for (auto& object : scene.objects)
+                // Forward opaque pass
                 {
-                    // Bind object descriptor set
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
+                    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipeline);
 
-                    // Draw object mesh
-                    VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
-                    VkDeviceSize offsets[] = { 0, };
-                    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-                    vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
-                    vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
+                    // Bind scene descriptor set
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
+                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
+
+                    // Render objects in scene
+                    for (auto& object : scene.objects)
+                    {
+                        // Bind object descriptor set
+                        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
+
+                        // Draw object mesh
+                        VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
+                        VkDeviceSize offsets[] = { 0, };
+                        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                        vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+                        vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
+                    }
+
+                    vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
                 }
 
-
-            vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
-
-                // Draw GUI
+                // GUI pass
                 ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 
-            vkCmdEndRenderPass(commandBuffer);
+                vkCmdEndRenderPass(commandBuffer);
+            }
 
             if (VK_FAILED(vkEndCommandBuffer(commandBuffer)))
             {

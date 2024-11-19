@@ -1,7 +1,7 @@
 #version 460
 #pragma shader_stage(fragment)
 
-#include "uniforms.glsl.h"
+#include "forward_uniforms.glsl.h"
 
 #define INV_GAMMA   2.2
 #define GAMMA       1.0 / INV_GAMMA

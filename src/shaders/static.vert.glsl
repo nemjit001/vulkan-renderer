@@ -1,7 +1,7 @@
 #version 460
 #pragma shader_stage(vertex)
 
-#include "uniforms.glsl.h"
+#include "forward_uniforms.glsl.h"
 
 layout(location = 0) in vec3 v_Position;
 layout(location = 1) in vec3 v_Color;
