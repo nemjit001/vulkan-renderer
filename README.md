@@ -17,15 +17,19 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 	- [ ] Camera controller
 - [ ] Scene loading (glTF2.0)
 - [ ] Lights
-	- [ ] Sun light (directional, cascaded shadow mapping)
-	- [ ] Point lights
+	- [X] Sun light (directional)
+	- [ ] Multiple point lights
 - [ ] Render pipeline
+	- [ ] Shadow mapping pass
+		- [ ] Sun only, cascaded
+		- [ ] Point lights
 	- [X] Depth prepass
 	- [ ] PBR materials
 	- [ ] Transparency pass
 - [ ] Animations
 	- [ ] Linear skinning
 	- [ ] Blend shapes
+	- [ ] DQ skinning
 - [ ] Volumetric clouds (raymarched)
 
 ![A sample image that was rendered using Vulkan renderer](render_sample.png?raw=true "Render Sample")
