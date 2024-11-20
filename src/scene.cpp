@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 
+#include <imgui_impl_vulkan.h>
 #include <volk.h>
 
 /// @brief Uniform scene data.
@@ -145,9 +146,19 @@ void Object::update()
     objectDataBuffer.unmap();
 }
 
-Scene::Scene(RenderDeviceContext* pDeviceContext, VkDescriptorSet sceneDataSet, VkDescriptorSet lightDataSet)
+Scene::Scene(
+    RenderDeviceContext* pDeviceContext,
+    VkPipelineLayout forwardPipelineLayout,
+    VkPipeline depthPrepassPipeline,
+    VkPipeline forwardPipeline,
+    VkDescriptorSet sceneDataSet,
+    VkDescriptorSet lightDataSet
+)
     :
     pDeviceContext(pDeviceContext),
+    forwardPipelineLayout(forwardPipelineLayout),
+    depthPrepassPipeline(depthPrepassPipeline),
+    forwardPipeline(forwardPipeline),
     sceneDataSet(sceneDataSet),
     lightDataSet(lightDataSet)
 {
@@ -279,5 +290,93 @@ void Scene::update()
     // Update object data in scene
     for (auto& object : objects) {
         object.update();
+    }
+}
+
+void Scene::render(
+    VkCommandBuffer commandBuffer,
+    VkRenderPass renderPass,
+    VkFramebuffer framebuffer,
+    uint32_t framebufferWidth,
+    uint32_t framebufferHeight
+)
+{
+    // TODO(nemjit001): Execute shadowmapping pass here.
+    // Begin forward render pass
+    {
+        VkClearValue clearValues[] = {
+            VkClearValue{{ 0.1F, 0.1F, 0.1F, 1.0F }},
+            VkClearValue{{ 1.0F, 0x00 }},
+        };
+
+        VkRenderPassBeginInfo renderPassBeginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+        renderPassBeginInfo.renderPass = renderPass;
+        renderPassBeginInfo.framebuffer = framebuffer;
+        renderPassBeginInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight } };
+        renderPassBeginInfo.clearValueCount = SIZEOF_ARRAY(clearValues);
+        renderPassBeginInfo.pClearValues = clearValues;
+
+        float viewportWidth = static_cast<float>(framebufferWidth);
+        float viewportHeight = static_cast<float>(framebufferHeight);
+        VkViewport viewport{ 0.0F, viewportHeight, viewportWidth, -1.0F * viewportHeight, 0.0F, 1.0F };
+        VkRect2D scissor{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight } };
+        vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+        // Depth prepass
+        {
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPrepassPipeline);
+
+            // Bind scene descriptor set
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 0, 1, &sceneDataSet, 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 1, 1, &lightDataSet, 0, nullptr);
+
+            // Render objects in scene
+            for (auto& object : objects)
+            {
+                // Bind object descriptor set
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
+
+                // Draw object mesh
+                VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
+                VkDeviceSize offsets[] = { 0, };
+                vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
+            }
+
+            vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
+        }
+
+        // Forward opaque pass
+        {
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipeline);
+
+            // Bind scene descriptor set
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 0, 1, &sceneDataSet, 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 1, 1, &lightDataSet, 0, nullptr);
+
+            // Render objects in scene
+            for (auto& object : objects)
+            {
+                // Bind object descriptor set
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
+
+                // Draw object mesh
+                VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
+                VkDeviceSize offsets[] = { 0, };
+                vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
+            }
+
+            vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
+        }
+
+        // GUI pass
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+
+        vkCmdEndRenderPass(commandBuffer);
     }
 }

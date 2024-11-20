@@ -113,16 +113,34 @@ class Scene
 public:
     Scene() = default;
 
-    Scene(RenderDeviceContext* pDeviceContext, VkDescriptorSet sceneDataSet, VkDescriptorSet lightDataSet);
+    Scene(
+        RenderDeviceContext* pDeviceContext,
+        VkPipelineLayout forwardPipelineLayout,
+        VkPipeline depthPrepassPipeline,
+        VkPipeline forwardPipeline,
+        VkDescriptorSet sceneDataSet,
+        VkDescriptorSet lightDataSet
+    );
 
     void destroy();
 
     void update();
 
+    void render(
+        VkCommandBuffer commandBuffer,
+        VkRenderPass renderPass,
+        VkFramebuffer framebuffer,
+        uint32_t framebufferWidth,
+        uint32_t framebufferHeight
+    );
+
 public:
     static constexpr uint32_t MaxSceneObjects = 1024;
 
     RenderDeviceContext* pDeviceContext = nullptr;
+    VkPipelineLayout forwardPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline depthPrepassPipeline = VK_NULL_HANDLE;
+    VkPipeline forwardPipeline = VK_NULL_HANDLE;
     VkDescriptorSet sceneDataSet = VK_NULL_HANDLE;
     VkDescriptorSet lightDataSet = VK_NULL_HANDLE;
 

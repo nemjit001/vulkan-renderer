@@ -58,8 +58,6 @@ namespace Engine
     VkPipelineLayout forwardPipelineLayout = VK_NULL_HANDLE;
     VkPipeline depthPrepassPipeline = VK_NULL_HANDLE;
     VkPipeline forwardPipeline = VK_NULL_HANDLE;
-    VkViewport viewport{};
-    VkRect2D scissor{};
 
     // Scene data
     VkDescriptorPool sceneDataDescriptorPool = VK_NULL_HANDLE;
@@ -560,8 +558,8 @@ namespace Engine
 
             float viewportWidth = static_cast<float>(framebufferWidth);
             float viewportHeight = static_cast<float>(framebufferHeight);
-            viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -1.0F * viewportHeight, 0.0F, 1.0F }; // viewport height hack is needed because of OpenGL / Vulkan viewport differences
-            scissor = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight } };
+            VkViewport viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -1.0F * viewportHeight, 0.0F, 1.0F }; // viewport height hack is needed because of OpenGL / Vulkan viewport differences
+            VkRect2D scissor = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight } };
 
             VkPipelineViewportStateCreateInfo viewportState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
             viewportState.flags = 0;
@@ -775,7 +773,15 @@ namespace Engine
                 return false;
             }
 
-            scene = Scene(pDeviceContext, sceneDataSet, lightDataSet);
+            scene = Scene(
+                pDeviceContext,
+                forwardPipelineLayout,
+                depthPrepassPipeline,
+                forwardPipeline,
+                sceneDataSet,
+                lightDataSet
+            );
+
             scene.cameraTransform.position = glm::vec3(0.0F, 0.0F, -5.0F);
             scene.camera.type = CameraType::Perspective;
             scene.camera.perspective.aspectRatio = static_cast<float>(DefaultWindowWidth) / static_cast<float>(DefaultWindowHeight);
@@ -1057,14 +1063,8 @@ namespace Engine
             }
         }
 
-        // Set viewport & scissor
-        float viewportWidth = static_cast<float>(framebufferWidth);
-        float viewportHeight = static_cast<float>(framebufferHeight);
-        viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -1.0F * viewportHeight, 0.0F, 1.0F }; // viewport height hack is needed because of OpenGL / Vulkan viewport differences
-        scissor = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight, }};
-
         // Update camera aspect ratio
-        scene.camera.perspective.aspectRatio = viewportWidth / viewportHeight;
+        scene.camera.perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
     }
 
     void update()
@@ -1145,10 +1145,6 @@ namespace Engine
             ImGui::DragFloat3("Position", &scene.cameraTransform.position[0], 0.1F);
             ImGui::DragFloat3("Rotation", &rotation[0], 0.1F);
             scene.cameraTransform.rotation = glm::quat(glm::radians(rotation));
-
-            // TODO(nemjit001): Implement per-object data editing
-            // ImGui::SeparatorText("Object data");
-            // ImGui::DragFloat("Specularity", &pObject->specularity, 0.01F, 0.0F, 1.0F);
         }
         ImGui::End();
 
@@ -1184,80 +1180,13 @@ namespace Engine
                 return;
             }
 
-            // TODO(nemjit001): Execute shadowmapping pass here.
-            // Begin forward render pass
-            {
-                VkClearValue clearValues[] = {
-                    VkClearValue{{ 0.1F, 0.1F, 0.1F, 1.0F }},
-                    VkClearValue{{ 1.0F, 0x00 }},
-                };
-
-                VkRenderPassBeginInfo renderPassBeginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-                renderPassBeginInfo.renderPass = renderPass;
-                renderPassBeginInfo.framebuffer = framebuffers[backbufferIndex];
-                renderPassBeginInfo.renderArea = VkRect2D{ VkOffset2D{ 0, 0 }, VkExtent2D{ framebufferWidth, framebufferHeight } };
-                renderPassBeginInfo.clearValueCount = SIZEOF_ARRAY(clearValues);
-                renderPassBeginInfo.pClearValues = clearValues;
-
-                vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-                vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-                vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-
-                // Depth prepass
-                {
-                    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPrepassPipeline);
-
-                    // Bind scene descriptor set
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
-
-                    // Render objects in scene
-                    for (auto& object : scene.objects)
-                    {
-                        // Bind object descriptor set
-                        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
-
-                        // Draw object mesh
-                        VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
-                        VkDeviceSize offsets[] = { 0, };
-                        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-                        vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
-                        vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
-                    }
-
-                    vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
-                }
-
-                // Forward opaque pass
-                {
-                    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipeline);
-
-                    // Bind scene descriptor set
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 0, 1, &scene.sceneDataSet, 0, nullptr);
-                    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 1, 1, &scene.lightDataSet, 0, nullptr);
-
-                    // Render objects in scene
-                    for (auto& object : scene.objects)
-                    {
-                        // Bind object descriptor set
-                        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipelineLayout, 2, 1, &object.objectDataSet, 0, nullptr);
-
-                        // Draw object mesh
-                        VkBuffer vertexBuffers[] = { object.mesh.vertexBuffer.handle, };
-                        VkDeviceSize offsets[] = { 0, };
-                        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-                        vkCmdBindIndexBuffer(commandBuffer, object.mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
-                        vkCmdDrawIndexed(commandBuffer, object.mesh.indexCount, 1, 0, 0, 0);
-                    }
-
-                    vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
-                }
-
-                // GUI pass
-                ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
-
-                vkCmdEndRenderPass(commandBuffer);
-            }
+            scene.render(
+                commandBuffer,
+                renderPass,
+                framebuffers[backbufferIndex],
+                framebufferWidth,
+                framebufferHeight
+            );
 
             if (VK_FAILED(vkEndCommandBuffer(commandBuffer)))
             {
