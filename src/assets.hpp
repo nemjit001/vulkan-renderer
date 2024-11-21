@@ -24,3 +24,12 @@ bool loadOBJ(RenderDeviceContext* pDeviceContext, char const* path, Mesh& mesh);
 /// @param texture 
 /// @return A boolean indicating success.
 bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture& texture);
+
+/// @brief Upload data to a texture. Mipmaps are generated for the texture automatically. The size of the data buffer must be the same
+/// as the 0th mip level extent * channels.
+/// @param pDeviceContext 
+/// @param texture 
+/// @param pData 
+/// @param size 
+/// @return A boolean indicating success.
+bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void* pData, size_t size);

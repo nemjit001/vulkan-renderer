@@ -117,22 +117,6 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
 
     printf("Texture has %d mip levels\n", mipLevels);
 
-    Buffer uploadBuffer{};
-    if (!pDeviceContext->createBuffer(
-        uploadBuffer,
-        width * height * channels,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        true
-    )) {
-        stbi_image_free(pImageData);
-        return false;
-    }
-
-    assert(uploadBuffer.mapped && uploadBuffer.pData != nullptr);
-    memcpy(uploadBuffer.pData, pImageData, uploadBuffer.size);
-    stbi_image_free(pImageData);
-
     if (!pDeviceContext->createTexture(
         texture,
         VK_IMAGE_TYPE_2D,
@@ -142,10 +126,35 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1,
         mipLevels
     )) {
-        uploadBuffer.destroy();
         stbi_image_free(pImageData);
         return false;
     }
+
+    if (!uploadToTexture(pDeviceContext, texture, pImageData, width * height * channels))
+    {
+        stbi_image_free(pImageData);
+        return false;
+    }
+
+    stbi_image_free(pImageData);
+    return true;
+}
+
+bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void* pData, size_t size)
+{
+    Buffer uploadBuffer{};
+    if (!pDeviceContext->createBuffer(
+        uploadBuffer,
+        size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        true
+    )) {
+        return false;
+    }
+
+    assert(uploadBuffer.mapped && uploadBuffer.pData != nullptr);
+    memcpy(uploadBuffer.pData, pData, uploadBuffer.size);
 
     // Schedule upload using transient upload buffer
     {
@@ -192,14 +201,14 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
 
         VkBufferImageCopy imageCopy{};
         imageCopy.bufferOffset = 0;
-        imageCopy.bufferRowLength = width;
-        imageCopy.bufferImageHeight = height;
+        imageCopy.bufferRowLength = texture.width;
+        imageCopy.bufferImageHeight = texture.height;
         imageCopy.imageSubresource.mipLevel = 0;
         imageCopy.imageSubresource.baseArrayLayer = 0;
         imageCopy.imageSubresource.layerCount = 1;
         imageCopy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         imageCopy.imageOffset = VkOffset3D{ 0, 0, 0 };
-        imageCopy.imageExtent = VkExtent3D{ static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 };
+        imageCopy.imageExtent = VkExtent3D{ static_cast<uint32_t>(texture.width), static_cast<uint32_t>(texture.height), 1 };
 
         vkCmdCopyBufferToImage(
             uploadCommandContext.handle,
