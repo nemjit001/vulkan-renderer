@@ -5,6 +5,7 @@
 class RenderDeviceContext;
 class Scene;
 
+/// @brief Renderer interface, manages render passes, pipelines, render command recording, etc. internally.
 class IRenderer
 {
 public:
@@ -21,6 +22,7 @@ protected:
 	RenderDeviceContext* m_pDeviceContext = nullptr;
 };
 
+/// @brief Forward renderer. Implements forward shading pipeline for opaque and transparent objects.
 class ForwardRenderer
 	:
 	public IRenderer
