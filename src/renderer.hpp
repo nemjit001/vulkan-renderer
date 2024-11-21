@@ -9,8 +9,10 @@
 #define SIZEOF_ARRAY(val)   (sizeof((val)) / sizeof((val)[0]))
 #define VK_FAILED(expr)     ((expr) != VK_SUCCESS)
 
+/// @brief Command queue types available in a render device context.
 enum class CommandQueueType : uint8_t
 {
+	Undefined = 0x00,
 	Direct = 0x01,
 	Copy = 0x02,
 };
@@ -64,6 +66,13 @@ struct Texture
 	uint32_t height;
 	uint32_t depthOrLayers;
 	uint32_t levels;
+};
+
+/// @brief Command context with associated command queue.
+struct CommandContext
+{
+	CommandQueueType queue;
+	VkCommandBuffer handle;
 };
 
 class RenderDeviceContext
@@ -136,16 +145,15 @@ public:
 		VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
 	);
 
-	/// @brief Create a command buffer for use on a specific queue.
+	/// @brief Create a command context for use on a specific queue.
 	/// @param queue Target command queue for the command buffer.
-	/// @param pCommandBuffer 
+	/// @param commandContext 
 	/// @return A boolean indicating successful creation.
-	bool createCommandBuffer(CommandQueueType queue, VkCommandBuffer* pCommandBuffer);
+	bool createCommandContext(CommandQueueType queue, CommandContext& commandContext);
 
-	/// @brief Destroy a command buffer.
-	/// @param queue Target queue used for creation.
-	/// @param commandBuffer Command buffer to destroy.
-	void destroyCommandBuffer(CommandQueueType queue, VkCommandBuffer commandBuffer);
+	/// @brief Destroy a command context.
+	/// @param commandContext Context to desctroy.
+	void destroyCommandContext(CommandContext& commandContext);
 
 	/// @brief Create a synchronization fence.
 	/// @param pFence 

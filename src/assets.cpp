@@ -149,8 +149,8 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
 
     // Schedule upload using transient upload buffer
     {
-        VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
-        if (!pDeviceContext->createCommandBuffer(CommandQueueType::Copy, &uploadCommandBuffer))
+        CommandContext uploadCommandContext{};
+        if (!pDeviceContext->createCommandContext(CommandQueueType::Copy, uploadCommandContext))
         {
             uploadBuffer.destroy();
             return false;
@@ -160,9 +160,9 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         uploadBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         uploadBeginInfo.pInheritanceInfo = nullptr;
 
-        if (VK_FAILED(vkBeginCommandBuffer(uploadCommandBuffer, &uploadBeginInfo)))
+        if (VK_FAILED(vkBeginCommandBuffer(uploadCommandContext.handle, &uploadBeginInfo)))
         {
-            pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
+            pDeviceContext->destroyCommandContext(uploadCommandContext);
             uploadBuffer.destroy();
             return false;
         }
@@ -181,7 +181,7 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         transferBarrier.subresourceRange.layerCount = texture.depthOrLayers;
         transferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
-        vkCmdPipelineBarrier(uploadCommandBuffer,
+        vkCmdPipelineBarrier(uploadCommandContext.handle,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             0,
@@ -202,7 +202,7 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         imageCopy.imageExtent = VkExtent3D{ static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 };
 
         vkCmdCopyBufferToImage(
-            uploadCommandBuffer,
+            uploadCommandContext.handle,
             uploadBuffer.handle,
             texture.handle,
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -246,7 +246,7 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
             dstMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
             VkImageMemoryBarrier mipBarriers[] = { srcMipBarrier, dstMipBarrier, };
-            vkCmdPipelineBarrier(uploadCommandBuffer,
+            vkCmdPipelineBarrier(uploadCommandContext.handle,
                 VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK_PIPELINE_STAGE_TRANSFER_BIT,
                 0,
@@ -270,7 +270,7 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
             blitRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
             vkCmdBlitImage(
-                uploadCommandBuffer,
+                uploadCommandContext.handle,
                 texture.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 texture.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 1, &blitRegion,
@@ -295,7 +295,7 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         shaderBarrier.subresourceRange.layerCount = texture.depthOrLayers;
         shaderBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
-        vkCmdPipelineBarrier(uploadCommandBuffer,
+        vkCmdPipelineBarrier(uploadCommandContext.handle,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             0,
@@ -304,9 +304,9 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
             1, &shaderBarrier
         );
 
-        if (VK_FAILED(vkEndCommandBuffer(uploadCommandBuffer)))
+        if (VK_FAILED(vkEndCommandBuffer(uploadCommandContext.handle)))
         {
-            pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
+            pDeviceContext->destroyCommandContext(uploadCommandContext);
             uploadBuffer.destroy();
             return false;
         }
@@ -314,7 +314,7 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         VkFence uploadFence = VK_NULL_HANDLE;
         if (!pDeviceContext->createFence(&uploadFence, false))
         {
-            pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
+            pDeviceContext->destroyCommandContext(uploadCommandContext);
             uploadBuffer.destroy();
             return false;
         }
@@ -324,21 +324,21 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         uploadSubmit.pWaitSemaphores = nullptr;
         uploadSubmit.pWaitDstStageMask = nullptr;
         uploadSubmit.commandBufferCount = 1;
-        uploadSubmit.pCommandBuffers = &uploadCommandBuffer;
+        uploadSubmit.pCommandBuffers = &uploadCommandContext.handle;
         uploadSubmit.signalSemaphoreCount = 0;
         uploadSubmit.pSignalSemaphores = nullptr;
 
         if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &uploadSubmit, uploadFence)))
         {
             pDeviceContext->destroyFence(uploadFence);
-            pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
+            pDeviceContext->destroyCommandContext(uploadCommandContext);
             uploadBuffer.destroy();
             return false;
         }
 
         vkWaitForFences(pDeviceContext->device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
         pDeviceContext->destroyFence(uploadFence);
-        pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
+        pDeviceContext->destroyCommandContext(uploadCommandContext);
     }
 
     uploadBuffer.destroy();

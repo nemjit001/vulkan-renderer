@@ -505,7 +505,7 @@ bool RenderDeviceContext::createTexture(
     return true;
 }
 
-bool RenderDeviceContext::createCommandBuffer(CommandQueueType queue, VkCommandBuffer* pCommandBuffer)
+bool RenderDeviceContext::createCommandContext(CommandQueueType queue, CommandContext& commandContext)
 {
     VkCommandPool pool = m_directCommandPool;
     switch (queue)
@@ -525,7 +525,8 @@ bool RenderDeviceContext::createCommandBuffer(CommandQueueType queue, VkCommandB
     commandBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     commandBufAllocInfo.commandBufferCount = 1;
 
-    if (VK_FAILED(vkAllocateCommandBuffers(device, &commandBufAllocInfo, pCommandBuffer)))
+    commandContext.queue = queue;
+    if (VK_FAILED(vkAllocateCommandBuffers(device, &commandBufAllocInfo, &commandContext.handle)))
     {
         return false;
     }
@@ -533,10 +534,10 @@ bool RenderDeviceContext::createCommandBuffer(CommandQueueType queue, VkCommandB
     return true;
 }
 
-void RenderDeviceContext::destroyCommandBuffer(CommandQueueType queue, VkCommandBuffer commandBuffer)
+void RenderDeviceContext::destroyCommandContext(CommandContext& commandContext)
 {
     VkCommandPool pool = m_directCommandPool;
-    switch (queue)
+    switch (commandContext.queue)
     {
     case CommandQueueType::Direct:
         pool = m_directCommandPool;
@@ -548,7 +549,9 @@ void RenderDeviceContext::destroyCommandBuffer(CommandQueueType queue, VkCommand
         break;
     }
 
-    vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
+    vkFreeCommandBuffers(device, pool, 1, &commandContext.handle);
+    commandContext.queue = CommandQueueType::Undefined;
+    commandContext.handle = VK_NULL_HANDLE;
 }
 
 bool RenderDeviceContext::createFence(VkFence* pFence, bool signaled)

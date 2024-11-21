@@ -43,8 +43,8 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
 
     // Schedule upload using transient upload buffer
     {
-        VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
-        if (!pDeviceContext->createCommandBuffer(CommandQueueType::Copy, &uploadCommandBuffer))
+        CommandContext uploadCommandContext{};
+        if (!pDeviceContext->createCommandContext(CommandQueueType::Copy, uploadCommandContext))
         {
             indexUploadBuffer.destroy();
             vertexUploadBuffer.destroy();
@@ -55,9 +55,9 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         uploadBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         uploadBeginInfo.pInheritanceInfo = nullptr;
 
-        if (VK_FAILED(vkBeginCommandBuffer(uploadCommandBuffer, &uploadBeginInfo)))
+        if (VK_FAILED(vkBeginCommandBuffer(uploadCommandContext.handle, &uploadBeginInfo)))
         {
-            pDeviceContext->destroyCommandBuffer(CommandQueueType::Direct, uploadCommandBuffer);
+            pDeviceContext->destroyCommandContext(uploadCommandContext);
             indexUploadBuffer.destroy();
             vertexUploadBuffer.destroy();
             return false;
@@ -73,12 +73,12 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         indexCopy.dstOffset = 0;
         indexCopy.size = indexBufferSize;
 
-        vkCmdCopyBuffer(uploadCommandBuffer, vertexUploadBuffer.handle, mesh.vertexBuffer.handle, 1, &vertexCopy);
-        vkCmdCopyBuffer(uploadCommandBuffer, indexUploadBuffer.handle, mesh.indexBuffer.handle, 1, &indexCopy);
+        vkCmdCopyBuffer(uploadCommandContext.handle, vertexUploadBuffer.handle, mesh.vertexBuffer.handle, 1, &vertexCopy);
+        vkCmdCopyBuffer(uploadCommandContext.handle, indexUploadBuffer.handle, mesh.indexBuffer.handle, 1, &indexCopy);
 
-        if (VK_FAILED(vkEndCommandBuffer(uploadCommandBuffer)))
+        if (VK_FAILED(vkEndCommandBuffer(uploadCommandContext.handle)))
         {
-            pDeviceContext->destroyCommandBuffer(CommandQueueType::Direct, uploadCommandBuffer);
+            pDeviceContext->destroyCommandContext(uploadCommandContext);
             indexUploadBuffer.destroy();
             vertexUploadBuffer.destroy();
             return false;
@@ -87,7 +87,7 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         VkFence uploadFence = VK_NULL_HANDLE;
         if (!pDeviceContext->createFence(&uploadFence, false))
         {
-            pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
+            pDeviceContext->destroyCommandContext(uploadCommandContext);
             indexUploadBuffer.destroy();
             vertexUploadBuffer.destroy();
             return false;
@@ -98,14 +98,14 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         uploadSubmit.pWaitSemaphores = nullptr;
         uploadSubmit.pWaitDstStageMask = nullptr;
         uploadSubmit.commandBufferCount = 1;
-        uploadSubmit.pCommandBuffers = &uploadCommandBuffer;
+        uploadSubmit.pCommandBuffers = &uploadCommandContext.handle;
         uploadSubmit.signalSemaphoreCount = 0;
         uploadSubmit.pSignalSemaphores = nullptr;
 
         if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &uploadSubmit, uploadFence)))
         {
             pDeviceContext->destroyFence(uploadFence);
-            pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
+            pDeviceContext->destroyCommandContext(uploadCommandContext);
             indexUploadBuffer.destroy();
             vertexUploadBuffer.destroy();
             return false;
@@ -113,7 +113,7 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
 
         vkWaitForFences(pDeviceContext->device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
         pDeviceContext->destroyFence(uploadFence);
-        pDeviceContext->destroyCommandBuffer(CommandQueueType::Copy, uploadCommandBuffer);
+        pDeviceContext->destroyCommandContext(uploadCommandContext);
     }
 
     indexUploadBuffer.destroy();
