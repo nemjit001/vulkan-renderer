@@ -42,7 +42,36 @@ void Texture::destroy()
     }
 
     vkFreeMemory(device, memory, nullptr);
+    vkDestroyImageView(device, view, nullptr);
     vkDestroyImage(device, handle, nullptr);
+}
+
+bool Texture::initDefaultView(VkImageViewType viewType, VkImageAspectFlags aspectMask)
+{
+    if (view != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, view, nullptr);
+        view = VK_NULL_HANDLE;
+    }
+
+    VkImageViewCreateInfo viewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    viewCreateInfo.image = handle;
+    viewCreateInfo.viewType = viewType;
+    viewCreateInfo.format = format;
+    viewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    viewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    viewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    viewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    viewCreateInfo.subresourceRange.baseMipLevel = 0;
+    viewCreateInfo.subresourceRange.levelCount = levels;
+    viewCreateInfo.subresourceRange.baseArrayLayer = 0;
+    viewCreateInfo.subresourceRange.layerCount = depthOrLayers;
+    viewCreateInfo.subresourceRange.aspectMask = aspectMask;
+
+    if (VK_FAILED(vkCreateImageView(device, &viewCreateInfo, nullptr, &view))) {
+        return false;
+    }
+
+    return true;
 }
 
 RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t windowWidth, uint32_t windowHeight)
@@ -191,11 +220,10 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
 
     // Create synchronization primitives for swap chain
     {
-        VkSemaphoreCreateInfo semaphoreCreateInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-        semaphoreCreateInfo.flags = 0;
+        VkFenceCreateInfo fenceCreateInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        fenceCreateInfo.flags = 0;
 
-        if (VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapAvailable))
-            || VK_FAILED(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &swapReleased)))
+        if (VK_FAILED(vkCreateFence(device, &fenceCreateInfo, nullptr, &m_swapAvailable)))
         {
             throw std::runtime_error("Vulkan swap sync primitive create failed");
         }
@@ -223,18 +251,16 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
     }
 
     printf("Render Device capabilities:\n");
-    printf("  - Immediate present support: %s\n", m_presentModeImmediateSupported ? "true" : "false");
-    printf("  - Mailbox present support:   %s\n", m_presentModeMailboxSupported ? "true" : "false");
+    printf("- Immediate present support: %s\n", m_presentModeImmediateSupported ? "true" : "false");
+    printf("- Mailbox present support:   %s\n", m_presentModeMailboxSupported ? "true" : "false");
 }
 
 RenderDeviceContext::~RenderDeviceContext()
 {
-    vkDestroySemaphore(device, swapReleased, nullptr);
     vkDestroyCommandPool(device, m_transferCommandPool, nullptr);
     vkDestroyCommandPool(device, m_directCommandPool, nullptr);
 
-    vkDestroySemaphore(device, swapAvailable, nullptr);
-
+    vkDestroyFence(device, m_swapAvailable, nullptr);
     for (auto& view : m_swapImageViews) {
         vkDestroyImageView(device, view, nullptr);
     }
@@ -245,7 +271,9 @@ RenderDeviceContext::~RenderDeviceContext()
 
 bool RenderDeviceContext::newFrame()
 {
-    switch (vkAcquireNextImageKHR(device, m_swapchain, UINT64_MAX, swapAvailable, VK_NULL_HANDLE, &m_backbufferIndex))
+    vkResetFences(device, 1, &m_swapAvailable);
+
+    switch (vkAcquireNextImageKHR(device, m_swapchain, UINT64_MAX, VK_NULL_HANDLE, m_swapAvailable, &m_backbufferIndex))
     {
     case VK_SUCCESS:
         break;
@@ -257,14 +285,15 @@ bool RenderDeviceContext::newFrame()
         break;
     }
 
+    vkWaitForFences(device, 1, &m_swapAvailable, VK_TRUE, UINT64_MAX);
     return true;
 }
 
 bool RenderDeviceContext::present()
 {
     VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &swapReleased;
+    presentInfo.waitSemaphoreCount = 0;
+    presentInfo.pWaitSemaphores = nullptr;
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &m_swapchain;
     presentInfo.pImageIndices = &m_backbufferIndex;
@@ -566,6 +595,7 @@ VkPhysicalDevice RenderDeviceContext::getAdapter()
 
 uint32_t RenderDeviceContext::getQueueFamily(CommandQueueType queue)
 {
+    (void)(queue);
     return m_directQueueFamily;
 }
 

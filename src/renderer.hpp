@@ -49,8 +49,15 @@ struct Texture
 	/// @brief Destroy this texture.
 	void destroy();
 
+	/// @brief Initialize the default image view for this texture.
+	/// @param viewType 
+	/// @param aspectMask 
+	/// @return 
+	bool initDefaultView(VkImageViewType viewType, VkImageAspectFlags aspectMask);
+
 	VkDevice device;
 	VkImage handle;
+	VkImageView view;
 	VkDeviceMemory memory;
 	VkFormat format;
 	uint32_t width;
@@ -194,9 +201,6 @@ public:
 	VkDevice device = VK_NULL_HANDLE;
 	VkQueue directQueue = VK_NULL_HANDLE;
 
-	VkSemaphore swapAvailable = VK_NULL_HANDLE;
-	VkSemaphore swapReleased = VK_NULL_HANDLE;
-
 private:
 	VkPhysicalDevice m_physicalDevice;
 	VkSurfaceKHR m_surface;
@@ -210,6 +214,7 @@ private:
 	std::vector<VkImage> m_swapImages{};
 	std::vector<VkImageView> m_swapImageViews{};
 	std::vector<Backbuffer> m_backbuffers;
+	VkFence m_swapAvailable = VK_NULL_HANDLE;
 
 	VkCommandPool m_directCommandPool = VK_NULL_HANDLE;
 	VkCommandPool m_transferCommandPool = VK_NULL_HANDLE;
