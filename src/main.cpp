@@ -14,6 +14,7 @@
 
 #include "assets.hpp"
 #include "math.hpp"
+#include "renderer.hpp"
 #include "render_backend.hpp"
 #include "scene.hpp"
 #include "timer.hpp"
@@ -33,7 +34,7 @@ namespace Engine
     Timer cpuUpdateTimer{};
     Timer cpuRenderTimer{};
     RenderDeviceContext* pDeviceContext = nullptr;
-
+    IRenderer* pRenderer = nullptr;
     Scene scene{};
 
     bool init()
@@ -75,6 +76,13 @@ namespace Engine
         if (pDeviceContext == nullptr)
         {
             printf("VK Renderer no render device available\n");
+            return false;
+        }
+
+        pRenderer = nullptr;
+        if (pRenderer == nullptr)
+        {
+            printf("VK Renderer renderer init failed\n");
             return false;
         }
 
@@ -125,8 +133,15 @@ namespace Engine
 
             SceneRef cubeObjectRef = scene.addObject(cubeMeshRef, brickMaterialRef);
             SceneRef suzanneObjectRef = scene.addObject(suzanneMeshRef, brickMaterialRef);
-            scene.createNode("Cube", Transform{});
-            scene.createNode("Suzanne", Transform{});
+
+            SceneRef cameraNode = scene.createNode("Camera", Transform{ { 0.0F, 0.0F, -5.0F } });
+            SceneRef cubeNode = scene.createNode("Cube", Transform{ { -2.0F, 0.0F, 0.0F } });
+            SceneRef suzanneNode = scene.createNode("Suzanne", Transform{ { 2.0F, 0.0F, 0.0F } });
+
+            // FIXME(nemjit001): fix this with a "normal" scene API (this is kinda gross).
+            scene.nodes.cameraRef[cameraNode] = cameraRef;
+            scene.nodes.objectRef[cubeNode] = cubeObjectRef;
+            scene.nodes.objectRef[suzanneNode] = suzanneObjectRef;
         }
 
         printf("Initialized Vulkan Renderer\n");
@@ -138,6 +153,7 @@ namespace Engine
         printf("Shutting down Vulkan Renderer\n");
 
         scene.clear();
+        delete pRenderer;
 
         RenderBackend::destroyRenderDevice(pDeviceContext);
         RenderBackend::shutdown();
@@ -163,7 +179,7 @@ namespace Engine
         framebufferWidth = static_cast<uint32_t>(width);
         framebufferHeight = static_cast<uint32_t>(height);
 
-        // TODO(nemjit001): Handle swap resize in renderer
+        pRenderer->onResize(framebufferWidth, framebufferHeight);
     }
 
     void update()
@@ -198,24 +214,24 @@ namespace Engine
             }
         }
 
-        // TODO(nemjit001): Update renderer scene state here (transforms, anims, etc.)
-
+        pRenderer->update(scene);
         cpuUpdateTimer.tick();
     }
 
     void render()
     {
-        // Await & start new frame
-        if (!pDeviceContext->newFrame()) {
+        if (!pDeviceContext->newFrame())
+        {
             resize();
             return;
         }
 
-        uint32_t backbufferIndex = pDeviceContext->getCurrentBackbufferIndex();
-
-        if (!pDeviceContext->present()) {
+        pRenderer->render(scene);
+        if (pDeviceContext->present()) {
             resize();
         }
+
+        return;
     }
 } // namespace Engine
 
