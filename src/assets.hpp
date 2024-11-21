@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "mesh.hpp"
-#include "renderer.hpp"
+#include "render_backend.hpp"
 
 /// @brief Read a binary shader file.
 /// @param path Path to the shader file.

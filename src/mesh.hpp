@@ -3,7 +3,7 @@
 #include <tiny_obj_loader.h>
 
 #include "math.hpp"
-#include "renderer.hpp"
+#include "render_backend.hpp"
 
 /// @brief Vertex struct with interleaved per-vertex data.
 struct Vertex

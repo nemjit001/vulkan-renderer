@@ -14,8 +14,8 @@
 
 #include "assets.hpp"
 #include "math.hpp"
+#include "render_backend.hpp"
 #include "scene.hpp"
-#include "renderer.hpp"
 #include "timer.hpp"
 
 namespace Engine
@@ -65,16 +65,16 @@ namespace Engine
             return false;
         }
 
-        if (!Renderer::init(pWindow))
+        if (!RenderBackend::init(pWindow))
         {
-            printf("VK Renderer renderer init failed\n");
+            printf("VK Renderer render backend init failed\n");
             return false;
         }
 
-        pDeviceContext = Renderer::pickRenderDevice();
+        pDeviceContext = RenderBackend::pickRenderDevice();
         if (pDeviceContext == nullptr)
         {
-            printf("VK Renderer no device available\n");
+            printf("VK Renderer no render device available\n");
             return false;
         }
 
@@ -139,8 +139,8 @@ namespace Engine
 
         scene.clear();
 
-        Renderer::destroyRenderDevice(pDeviceContext);
-        Renderer::shutdown();
+        RenderBackend::destroyRenderDevice(pDeviceContext);
+        RenderBackend::shutdown();
 
         ImGui_ImplSDL2_Shutdown();
         SDL_DestroyWindow(pWindow);

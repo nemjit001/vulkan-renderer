@@ -1,4 +1,4 @@
-#include "renderer.hpp"
+#include "render_backend.hpp"
 
 #include <cassert>
 #include <stdexcept>
@@ -650,7 +650,7 @@ uint32_t RenderDeviceContext::getMemoryTypeIndex(VkMemoryRequirements const& req
     return ~0U;
 }
 
-namespace Renderer
+namespace RenderBackend
 {
     SDL_Window* pAssociatedWindow = nullptr;
     VkInstance instance = VK_NULL_HANDLE;
@@ -827,4 +827,4 @@ namespace Renderer
 
         delete pContext;
     }
-}
+} // namespace RenderBackend

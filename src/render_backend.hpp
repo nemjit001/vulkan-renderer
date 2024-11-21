@@ -230,7 +230,7 @@ private:
 	uint32_t m_backbufferIndex = 0;
 };
 
-namespace Renderer
+namespace RenderBackend
 {
 	/// @brief Initialize the render backend.
 	/// @param pWindow Associated window pointer.
@@ -251,4 +251,4 @@ namespace Renderer
 	/// @brief Destroy a render device context.
 	/// @param pContext 
 	void destroyRenderDevice(RenderDeviceContext* pContext);
-}
+} // namespace RenderBackend

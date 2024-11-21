@@ -6,7 +6,7 @@
 #include "assets.hpp"
 #include "camera.hpp"
 #include "mesh.hpp"
-#include "renderer.hpp"
+#include "render_backend.hpp"
 #include "transform.hpp"
 
 constexpr glm::vec3 FORWARD = glm::vec3(0.0F, 0.0F, 1.0F);
