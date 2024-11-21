@@ -30,67 +30,19 @@ struct Material
 class Scene
 {
 public:
-    SceneRef addCamera(Camera const& camera)
-    {
-        SceneRef ref = static_cast<SceneRef>(cameras.size());
-        cameras.push_back(camera);
-        return ref;
-    }
+    SceneRef addCamera(Camera const& camera);
 
-    SceneRef addMesh(Mesh const& mesh)
-    {
-        SceneRef ref = static_cast<SceneRef>(meshes.size());
-        meshes.push_back(mesh);
-        return ref;
-    }
+    SceneRef addMesh(Mesh const& mesh);
 
-    SceneRef addTexture(Texture const& texture)
-    {
-        SceneRef ref = static_cast<SceneRef>(textures.size());
-        textures.push_back(texture);
-        return ref;
-    }
+    SceneRef addTexture(Texture const& texture);
 
-    SceneRef addMaterial(Material const& material)
-    {
-        SceneRef ref = static_cast<SceneRef>(materials.size());
-        materials.push_back(material);
-        return ref;
-    }
+    SceneRef addMaterial(Material const& material);
 
-    SceneRef addObject(SceneRef mesh, SceneRef material)
-    {
-        SceneRef ref = static_cast<SceneRef>(objects.count);
-        objects.meshRef.push_back(mesh);
-        objects.materialRef.push_back(material);
-        objects.count++;
+    SceneRef addObject(SceneRef mesh, SceneRef material);
 
-        assert(
-            objects.count == objects.meshRef.size()
-            && objects.count == objects.materialRef.size()
-        );
+    SceneRef createNode(std::string const& name = "Node", Transform const& transform = Transform{});
 
-        return ref;
-    }
-
-    SceneRef createNode(std::string const& name = "Node", Transform const& transform = Transform{})
-    {
-        SceneRef ref = static_cast<SceneRef>(nodes.count);
-        nodes.name.push_back(name);
-        nodes.transform.push_back(transform);
-        nodes.cameraRef.push_back(RefUnused);
-        nodes.objectRef.push_back(RefUnused);
-        nodes.count++;
-
-        assert(
-            nodes.count == nodes.name.size()
-            && nodes.count == nodes.transform.size()
-            && nodes.count == nodes.cameraRef.size()
-            && nodes.count == nodes.objectRef.size()
-        );
-
-        return ref;
-    }
+    void clear();
 
 public:
     std::vector<Camera> cameras{};

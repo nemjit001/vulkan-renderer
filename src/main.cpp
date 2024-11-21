@@ -137,6 +137,8 @@ namespace Engine
     {
         printf("Shutting down Vulkan Renderer\n");
 
+        scene.clear();
+
         Renderer::destroyRenderDevice(pDeviceContext);
         Renderer::shutdown();
 
