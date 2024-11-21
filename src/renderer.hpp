@@ -203,6 +203,8 @@ private:
 	VkPhysicalDeviceMemoryProperties m_memoryProperties{};
 	uint32_t m_directQueueFamily = VK_QUEUE_FAMILY_IGNORED;
 
+	bool m_presentModeImmediateSupported = false;
+	bool m_presentModeMailboxSupported = false;
 	VkSwapchainCreateInfoKHR m_swapchainCreateInfo{};
 	VkSwapchainKHR m_swapchain = VK_NULL_HANDLE;
 	std::vector<VkImage> m_swapImages{};
@@ -235,5 +237,5 @@ namespace Renderer
 
 	/// @brief Destroy a render device context.
 	/// @param pContext 
-	void destroyRenderDeviceContext(RenderDeviceContext* pContext);
+	void destroyRenderDevice(RenderDeviceContext* pContext);
 }

@@ -29,42 +29,6 @@ struct UniformObjectData
     __declspec(align(4))  float specularity;
 };
 
-glm::mat4 Transform::matrix() const
-{
-    return glm::translate(glm::identity<glm::mat4>(), position)
-        * glm::mat4_cast(rotation)
-        * glm::scale(glm::identity<glm::mat4>(), scale);
-}
-
-glm::mat4 PerspectiveCamera::matrix() const
-{
-    return glm::perspective(glm::radians(FOVy), aspectRatio, zNear, zFar);
-}
-
-glm::mat4 OrthographicCamera::matrix() const
-{
-    return glm::ortho(
-        -0.5F * xMag, 0.5F * xMag,
-        -0.5F * yMag, 0.5F * yMag,
-        zNear, zFar
-    );
-}
-
-glm::mat4 Camera::matrix() const
-{
-    switch (type)
-    {
-    case CameraType::Perspective:
-        return perspective.matrix();
-    case CameraType::Orthographic:
-        return ortho.matrix();
-    default:
-        break;
-    }
-
-    return glm::identity<glm::mat4>();
-}
-
 Object::Object(
     RenderDeviceContext* pDeviceContext,
     VkDescriptorSet objectDataSet,

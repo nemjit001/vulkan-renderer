@@ -962,7 +962,7 @@ namespace Engine
         pDeviceContext->destroyCommandBuffer(CommandQueueType::Direct, commandBuffer);
         pDeviceContext->destroyFence(commandsFinished);
 
-        Renderer::destroyRenderDeviceContext(pDeviceContext);
+        Renderer::destroyRenderDevice(pDeviceContext);
         Renderer::shutdown();
 
         ImGui_ImplSDL2_Shutdown();

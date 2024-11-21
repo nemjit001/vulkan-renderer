@@ -113,6 +113,22 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
             }
         }
 
+        uint32_t presentModeCount = 0;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
+        std::vector<VkPresentModeKHR> presentModes(presentModeCount);
+        vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, presentModes.data());
+
+        for (auto const& presentMode : presentModes)
+        {
+            if (presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+                m_presentModeImmediateSupported = true;
+            }
+
+            if (presentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+                m_presentModeMailboxSupported = true;
+            }
+        }
+
         // Create swap chain
         m_swapchainCreateInfo = VkSwapchainCreateInfoKHR{ VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
         m_swapchainCreateInfo.flags = 0;
@@ -205,6 +221,10 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
             throw std::runtime_error("Vulkan transfer command pool create failed");
         }
     }
+
+    printf("Render Device capabilities:\n");
+    printf("  - Immediate present support: %s\n", m_presentModeImmediateSupported ? "true" : "false");
+    printf("  - Mailbox present support:   %s\n", m_presentModeMailboxSupported ? "true" : "false");
 }
 
 RenderDeviceContext::~RenderDeviceContext()
@@ -766,7 +786,7 @@ namespace Renderer
         return new RenderDeviceContext(physicalDevice, surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
     }
 
-    void destroyRenderDeviceContext(RenderDeviceContext* pContext)
+    void destroyRenderDevice(RenderDeviceContext* pContext)
     {
         if (pContext == nullptr) {
             return;
