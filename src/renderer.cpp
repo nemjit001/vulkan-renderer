@@ -47,13 +47,13 @@ void Texture::destroy()
 
 RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t windowWidth, uint32_t windowHeight)
     :
-    physicalDevice(physicalDevice),
-    surface(surface)
+    m_physicalDevice(physicalDevice),
+    m_surface(surface)
 {
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
-    directQueueFamily = findQueueFamily(physicalDevice, surface, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT | VK_QUEUE_COMPUTE_BIT, 0);
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &m_memoryProperties);
+    m_directQueueFamily = findQueueFamily(physicalDevice, surface, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT | VK_QUEUE_COMPUTE_BIT, 0);
 
-    if (directQueueFamily == VK_QUEUE_FAMILY_IGNORED) {
+    if (m_directQueueFamily == VK_QUEUE_FAMILY_IGNORED) {
         throw std::runtime_error("Vulkan direct queue unavailable");
     }
 
@@ -65,7 +65,7 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
         float priorities[] = { 1.0F };
         VkDeviceQueueCreateInfo directQueueCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
         directQueueCreateInfo.flags = 0;
-        directQueueCreateInfo.queueFamilyIndex = directQueueFamily;
+        directQueueCreateInfo.queueFamilyIndex = m_directQueueFamily;
         directQueueCreateInfo.queueCount = SIZEOF_ARRAY(priorities);
         directQueueCreateInfo.pQueuePriorities = priorities;
 
@@ -87,7 +87,7 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
         }
         volkLoadDevice(device);
 
-        vkGetDeviceQueue(device, directQueueFamily, 0, &directQueue);
+        vkGetDeviceQueue(device, m_directQueueFamily, 0, &directQueue);
         assert(directQueue != VK_NULL_HANDLE);
     }
 
@@ -189,7 +189,7 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
     {
         VkCommandPoolCreateInfo directCommandPoolCreateInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
         directCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        directCommandPoolCreateInfo.queueFamilyIndex = directQueueFamily;
+        directCommandPoolCreateInfo.queueFamilyIndex = m_directQueueFamily;
 
         if (VK_FAILED(vkCreateCommandPool(device, &directCommandPoolCreateInfo, nullptr, &m_directCommandPool)))
         {
@@ -198,7 +198,7 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
 
         VkCommandPoolCreateInfo transferCommandPoolCreateInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
         transferCommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-        transferCommandPoolCreateInfo.queueFamilyIndex = directQueueFamily;
+        transferCommandPoolCreateInfo.queueFamilyIndex = m_directQueueFamily;
 
         if (VK_FAILED(vkCreateCommandPool(device, &transferCommandPoolCreateInfo, nullptr, &m_transferCommandPool)))
         {
@@ -280,7 +280,7 @@ bool RenderDeviceContext::resizeSwapResources(uint32_t width, uint32_t height)
 
         // Query new surface capabilites
         VkSurfaceCapabilitiesKHR surfaceCaps{};
-        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCaps);
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_physicalDevice, m_surface, &surfaceCaps);
 
         // Recreate swap chain & destroy old swap chain
         m_swapchainCreateInfo.minImageCount = (surfaceCaps.maxImageCount == 0 || surfaceCaps.minImageCount + 1 < surfaceCaps.maxImageCount) ?
@@ -411,7 +411,7 @@ bool RenderDeviceContext::createTexture(
     texture.levels = levels;
 
     VkImageFormatProperties formatProperties{};
-    vkGetPhysicalDeviceImageFormatProperties(physicalDevice, format, imageType, tiling, usage, 0, &formatProperties);
+    vkGetPhysicalDeviceImageFormatProperties(m_physicalDevice, format, imageType, tiling, usage, 0, &formatProperties);
     if (formatProperties.maxExtent.width < width
         || formatProperties.maxExtent.height < height
         || formatProperties.maxExtent.depth < depth
@@ -539,6 +539,16 @@ std::vector<Backbuffer> RenderDeviceContext::getBackbuffers() const
     return m_backbuffers;
 }
 
+VkPhysicalDevice RenderDeviceContext::getAdapter()
+{
+    return m_physicalDevice;
+}
+
+uint32_t RenderDeviceContext::getQueueFamily(CommandQueueType queue)
+{
+    return m_directQueueFamily;
+}
+
 uint32_t RenderDeviceContext::findQueueFamily(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkQueueFlags flags, VkQueueFlags exclude)
 {
     uint32_t queueFamilyCount = 0;
@@ -572,12 +582,12 @@ uint32_t RenderDeviceContext::findQueueFamily(VkPhysicalDevice physicalDevice, V
 
 uint32_t RenderDeviceContext::getMemoryTypeIndex(VkMemoryRequirements const& requirements, VkMemoryPropertyFlags propertyFlags) const
 {
-    for (uint32_t memIdx = 0; memIdx < memoryProperties.memoryTypeCount; memIdx++)
+    for (uint32_t memIdx = 0; memIdx < m_memoryProperties.memoryTypeCount; memIdx++)
     {
         uint32_t const memoryTypeBits = (1 << memIdx);
 
         if ((requirements.memoryTypeBits & memoryTypeBits) != 0
-            && (memoryProperties.memoryTypes[memIdx].propertyFlags & propertyFlags) == propertyFlags)
+            && (m_memoryProperties.memoryTypes[memIdx].propertyFlags & propertyFlags) == propertyFlags)
         {
             return memIdx;
         }

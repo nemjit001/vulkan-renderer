@@ -317,9 +317,9 @@ namespace Engine
 
             ImGui_ImplVulkan_InitInfo initInfo{};
             initInfo.Instance = Renderer::getInstance();
-            initInfo.PhysicalDevice = pDeviceContext->physicalDevice;
+            initInfo.PhysicalDevice = pDeviceContext->getAdapter();
             initInfo.Device = pDeviceContext->device;
-            initInfo.QueueFamily = pDeviceContext->directQueueFamily;
+            initInfo.QueueFamily = pDeviceContext->getQueueFamily(CommandQueueType::Direct);
             initInfo.Queue = pDeviceContext->directQueue;
             initInfo.DescriptorPool = imguiDescriptorPool;
             initInfo.RenderPass = renderPass;

@@ -166,6 +166,15 @@ public:
 	/// @return 
 	std::vector<Backbuffer> getBackbuffers() const;
 
+	/// @brief Retrieve the physical device (adapter) associated with this device context.
+	/// @return 
+	VkPhysicalDevice getAdapter();
+
+	/// @brief Retrieve the queue family index for a command queue type.
+	/// @param queue 
+	/// @return 
+	uint32_t getQueueFamily(CommandQueueType queue);
+
 private:
     /// @brief Find a device queue family based on required and exclusion flags.
     /// @param physicalDevice 
@@ -182,19 +191,18 @@ private:
     uint32_t getMemoryTypeIndex(VkMemoryRequirements const& requirements, VkMemoryPropertyFlags propertyFlags) const;
 
 public:
-	VkPhysicalDevice physicalDevice;
-	VkSurfaceKHR surface;
-	VkPhysicalDeviceMemoryProperties memoryProperties{};
-	uint32_t directQueueFamily = VK_QUEUE_FAMILY_IGNORED;
-
 	VkDevice device = VK_NULL_HANDLE;
 	VkQueue directQueue = VK_NULL_HANDLE;
 
-	// TODO(nemjit001): move sync to API user side
 	VkSemaphore swapAvailable = VK_NULL_HANDLE;
 	VkSemaphore swapReleased = VK_NULL_HANDLE;
 
 private:
+	VkPhysicalDevice m_physicalDevice;
+	VkSurfaceKHR m_surface;
+	VkPhysicalDeviceMemoryProperties m_memoryProperties{};
+	uint32_t m_directQueueFamily = VK_QUEUE_FAMILY_IGNORED;
+
 	VkSwapchainCreateInfoKHR m_swapchainCreateInfo{};
 	VkSwapchainKHR m_swapchain = VK_NULL_HANDLE;
 	std::vector<VkImage> m_swapImages{};
