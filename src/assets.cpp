@@ -1,6 +1,8 @@
 #define _CRT_SECURE_NO_WARNINGS //< Used to silence C file IO function warnings
 
 #include "assets.hpp"
+#include "mesh.hpp"
+#include "render_backend.hpp"
 
 #include <cstdio>
 

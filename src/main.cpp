@@ -79,7 +79,7 @@ namespace Engine
             return false;
         }
 
-        pRenderer = nullptr;
+        pRenderer = new ForwardRenderer(pDeviceContext);
         if (pRenderer == nullptr)
         {
             printf("VK Renderer renderer init failed\n");
@@ -175,11 +175,13 @@ namespace Engine
             return;
         }
 
-        printf("Window resized (%d x %d)\n", width, height);
         framebufferWidth = static_cast<uint32_t>(width);
         framebufferHeight = static_cast<uint32_t>(height);
+        if (!pRenderer->onResize(framebufferWidth, framebufferHeight)) {
+            isRunning = false;
+        }
 
-        pRenderer->onResize(framebufferWidth, framebufferHeight);
+        printf("Window resized (%d x %d)\n", width, height);
     }
 
     void update()

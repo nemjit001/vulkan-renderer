@@ -1,7 +1,5 @@
 #pragma once
 
-#include <tiny_obj_loader.h>
-
 #include "math.hpp"
 #include "render_backend.hpp"
 
@@ -23,8 +21,8 @@ struct Mesh
 
     uint32_t vertexCount;
     uint32_t indexCount;
-    Buffer vertexBuffer{};
-    Buffer indexBuffer{};
+    Buffer vertexBuffer;
+    Buffer indexBuffer;
 };
 
 /// @brief Create a mesh object, uploads vertex data to GPU memory.

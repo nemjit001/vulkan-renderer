@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
-#include "mesh.hpp"
-#include "render_backend.hpp"
+struct Buffer;
+struct Texture;
+struct Mesh;
+class RenderDeviceContext;
 
 /// @brief Read a binary shader file.
 /// @param path Path to the shader file.
