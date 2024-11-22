@@ -102,6 +102,7 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
 
         VkPhysicalDeviceVulkan12Features enabledFeatures12{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
         enabledFeatures12.descriptorIndexing = VK_TRUE;
+        enabledFeatures12.runtimeDescriptorArray = VK_TRUE;
         enabledFeatures11.pNext = &enabledFeatures12;
 
         VkDeviceCreateInfo deviceCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
@@ -806,7 +807,8 @@ namespace RenderBackend
 
             if (deviceFeatures.features.samplerAnisotropy == VK_TRUE
                 && deviceFeatures.features.depthBounds == VK_TRUE
-                && deviceFeatures12.descriptorIndexing == VK_TRUE)
+                && deviceFeatures12.descriptorIndexing == VK_TRUE
+                && deviceFeatures12.runtimeDescriptorArray == VK_TRUE)
             {
                 physicalDevice = device;
                 printf("Automatically selected render device: %s\n", deviceProperties.properties.deviceName);

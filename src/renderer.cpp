@@ -5,6 +5,9 @@
 
 #include <volk.h>
 
+#include "assets.hpp"
+#include "mesh.hpp"
+
 IRenderer::IRenderer(RenderDeviceContext* pDeviceContext)
 	:
 	m_pDeviceContext(pDeviceContext)
@@ -208,7 +211,187 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 
 		// Create forward graphics pipelines
 		{
+			std::vector<uint32_t> forwardVertCode{};
+			std::vector<uint32_t> forwardFragCode{};
+			if (!readShaderFile("forward.vert.spv", forwardVertCode)
+				|| !readShaderFile("forward.frag.spv", forwardFragCode)) {
+				throw std::runtime_error("Forward Renderer shader file read failed (forward opaque)\n");
+			}
 
+			VkShaderModuleCreateInfo forwardVertCreateInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+			forwardVertCreateInfo.flags = 0;
+			forwardVertCreateInfo.codeSize = static_cast<uint32_t>(forwardVertCode.size() * 4);
+			forwardVertCreateInfo.pCode = forwardVertCode.data();
+
+			VkShaderModuleCreateInfo forwardFragCreateInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+			forwardFragCreateInfo.flags = 0;
+			forwardFragCreateInfo.codeSize = static_cast<uint32_t>(forwardFragCode.size() * 4);
+			forwardFragCreateInfo.pCode = forwardFragCode.data();
+
+			VkShaderModule forwardVertModule = VK_NULL_HANDLE;
+			VkShaderModule forwardFragModule = VK_NULL_HANDLE;
+			if (VK_FAILED(vkCreateShaderModule(m_pDeviceContext->device, &forwardVertCreateInfo, nullptr, &forwardVertModule))
+				|| VK_FAILED(vkCreateShaderModule(m_pDeviceContext->device, &forwardFragCreateInfo, nullptr, &forwardFragModule))) {
+				throw std::runtime_error("Forward Renderer shader module create failed (forward opaque)\n");
+			}
+
+			VkPipelineShaderStageCreateInfo forwardVertStage{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+			forwardVertStage.flags = 0;
+			forwardVertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+			forwardVertStage.module = forwardVertModule;
+			forwardVertStage.pName = "main";
+			forwardVertStage.pSpecializationInfo = nullptr;
+
+			VkPipelineShaderStageCreateInfo forwardFragStage{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+			forwardFragStage.flags = 0;
+			forwardFragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+			forwardFragStage.module = forwardFragModule;
+			forwardFragStage.pName = "main";
+			forwardFragStage.pSpecializationInfo = nullptr;
+
+			VkPipelineShaderStageCreateInfo forwardOpaqueStages[] = { forwardVertStage, forwardFragStage, };
+
+			VkVertexInputBindingDescription bindingDescriptions[] = {
+				{ 0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX, }
+			};
+
+			VkVertexInputAttributeDescription attributeDescriptions[] = {
+				{ 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position), },
+				{ 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color), },
+				{ 2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal), },
+				{ 3, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, tangent), },
+				{ 4, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, texCoord), },
+			};
+
+			VkPipelineVertexInputStateCreateInfo vertexInputState{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+			vertexInputState.flags = 0;
+			vertexInputState.vertexBindingDescriptionCount = SIZEOF_ARRAY(bindingDescriptions);
+			vertexInputState.pVertexBindingDescriptions = bindingDescriptions;
+			vertexInputState.vertexAttributeDescriptionCount = SIZEOF_ARRAY(attributeDescriptions);
+			vertexInputState.pVertexAttributeDescriptions = attributeDescriptions;
+
+			VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+			inputAssemblyState.flags = 0;
+			inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+			inputAssemblyState.primitiveRestartEnable = VK_FALSE;
+
+			float viewportWidth = static_cast<float>(m_framebufferWidth);
+			float viewportHeight = static_cast<float>(m_framebufferHeight);
+			VkViewport viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -viewportHeight, 0.0F, 1.0F };
+			VkRect2D scissor = VkRect2D{ { 0, 0 }, { m_framebufferWidth, m_framebufferHeight } };
+
+			VkPipelineViewportStateCreateInfo viewportState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+			viewportState.flags = 0;
+			viewportState.viewportCount = 1;
+			viewportState.pViewports = &viewport;
+			viewportState.scissorCount = 1;
+			viewportState.pScissors = &scissor;
+
+			VkPipelineRasterizationStateCreateInfo rasterizationState{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+			rasterizationState.flags = 0;
+			rasterizationState.depthClampEnable = VK_FALSE;
+			rasterizationState.rasterizerDiscardEnable = VK_FALSE;
+			rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
+			rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+			rasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+			rasterizationState.depthBiasEnable = VK_FALSE;
+			rasterizationState.depthBiasConstantFactor = 0.0F;
+			rasterizationState.depthBiasClamp = 0.0F;
+			rasterizationState.depthBiasSlopeFactor = 0.0F;
+			rasterizationState.lineWidth = 1.0F;
+
+			VkPipelineMultisampleStateCreateInfo multisampleState{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+			multisampleState.flags = 0;
+			multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+			multisampleState.sampleShadingEnable = VK_FALSE;
+			multisampleState.minSampleShading = 0.0F;
+			multisampleState.pSampleMask = nullptr;
+			multisampleState.alphaToCoverageEnable = VK_FALSE;
+			multisampleState.alphaToOneEnable = VK_FALSE;
+
+			VkPipelineDepthStencilStateCreateInfo depthStencilState{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+			depthStencilState.flags = 0;
+			depthStencilState.depthTestEnable = VK_TRUE;
+			depthStencilState.depthWriteEnable = VK_TRUE;
+			depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS;
+			depthStencilState.depthBoundsTestEnable = VK_TRUE;
+			depthStencilState.stencilTestEnable = VK_FALSE;
+			depthStencilState.front = { VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_NEVER, UINT32_MAX, UINT32_MAX, UINT32_MAX };
+			depthStencilState.back = { VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_NEVER, UINT32_MAX, UINT32_MAX, UINT32_MAX };
+			depthStencilState.minDepthBounds = 0.0F;
+			depthStencilState.maxDepthBounds = 1.0F;
+
+			VkPipelineColorBlendAttachmentState colorBlendTarget{};
+			colorBlendTarget.blendEnable = VK_FALSE;
+			colorBlendTarget.srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+			colorBlendTarget.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+			colorBlendTarget.colorBlendOp = VK_BLEND_OP_ADD;
+			colorBlendTarget.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+			colorBlendTarget.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+			colorBlendTarget.alphaBlendOp = VK_BLEND_OP_ADD;
+			colorBlendTarget.colorWriteMask = VK_COLOR_COMPONENT_R_BIT
+				| VK_COLOR_COMPONENT_G_BIT
+				| VK_COLOR_COMPONENT_B_BIT
+				| VK_COLOR_COMPONENT_A_BIT;
+
+			VkPipelineColorBlendAttachmentState colorBlendAttachments[] = { colorBlendTarget, };
+			VkPipelineColorBlendStateCreateInfo colorBlendState{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+			colorBlendState.flags = 0;
+			colorBlendState.logicOpEnable = VK_FALSE;
+			colorBlendState.logicOp = VK_LOGIC_OP_CLEAR;
+			colorBlendState.attachmentCount = SIZEOF_ARRAY(colorBlendAttachments);
+			colorBlendState.pAttachments = colorBlendAttachments;
+			colorBlendState.blendConstants[0] = 0.0F;
+			colorBlendState.blendConstants[1] = 0.0F;
+			colorBlendState.blendConstants[2] = 0.0F;
+			colorBlendState.blendConstants[3] = 0.0F;
+
+			VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, };
+			VkPipelineDynamicStateCreateInfo dynamicState{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+			dynamicState.flags = 0;
+			dynamicState.dynamicStateCount = SIZEOF_ARRAY(dynamicStates);
+			dynamicState.pDynamicStates = dynamicStates;
+
+			VkGraphicsPipelineCreateInfo forwardOpaqueCreateInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+			forwardOpaqueCreateInfo.flags = 0;
+			forwardOpaqueCreateInfo.stageCount = SIZEOF_ARRAY(forwardOpaqueStages);
+			forwardOpaqueCreateInfo.pStages = forwardOpaqueStages;
+			forwardOpaqueCreateInfo.pVertexInputState = &vertexInputState;
+			forwardOpaqueCreateInfo.pInputAssemblyState = &inputAssemblyState;
+			forwardOpaqueCreateInfo.pTessellationState = nullptr;
+			forwardOpaqueCreateInfo.pViewportState = &viewportState;
+			forwardOpaqueCreateInfo.pRasterizationState = &rasterizationState;
+			forwardOpaqueCreateInfo.pMultisampleState = &multisampleState;
+			forwardOpaqueCreateInfo.pDepthStencilState = &depthStencilState;
+			forwardOpaqueCreateInfo.pColorBlendState = &colorBlendState;
+			forwardOpaqueCreateInfo.pDynamicState = &dynamicState;
+			forwardOpaqueCreateInfo.layout = m_forwardPipelineLayout;
+			forwardOpaqueCreateInfo.renderPass = m_forwardRenderPass;
+			forwardOpaqueCreateInfo.subpass = 0;
+			forwardOpaqueCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
+			forwardOpaqueCreateInfo.basePipelineIndex = 0;
+
+			if (VK_FAILED(vkCreateGraphicsPipelines(m_pDeviceContext->device, VK_NULL_HANDLE, 1, &forwardOpaqueCreateInfo, nullptr, &m_forwardOpaquePipeline))) {
+				throw std::runtime_error("Forward Renderer forward pipeline create failed\n");
+			}
+
+			vkDestroyShaderModule(m_pDeviceContext->device, forwardFragModule, nullptr);
+			vkDestroyShaderModule(m_pDeviceContext->device, forwardVertModule, nullptr);
+		}
+
+		// Create forward descriptor pool
+		{
+			uint32_t const maxSets = 1;
+
+			VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+			descriptorPoolCreateInfo.flags = 0;
+			descriptorPoolCreateInfo.maxSets = maxSets;
+			descriptorPoolCreateInfo.poolSizeCount = 0;
+			descriptorPoolCreateInfo.pPoolSizes = nullptr;
+
+			if (VK_FAILED(vkCreateDescriptorPool(m_pDeviceContext->device, &descriptorPoolCreateInfo, nullptr, &m_forwardDescriptorPool))) {
+				throw std::runtime_error("Forward Renderer forward descriptor pool create failed\n");
+			}
 		}
 	}
 }
@@ -221,7 +404,7 @@ ForwardRenderer::~ForwardRenderer()
 	// Destroy forward rendering members
 	vkDestroyDescriptorPool(m_pDeviceContext->device, m_forwardDescriptorPool, nullptr);
 
-	vkDestroyPipeline(m_pDeviceContext->device, m_shadowmappingPipeline, nullptr);
+	vkDestroyPipeline(m_pDeviceContext->device, m_forwardOpaquePipeline, nullptr);
 
 	vkDestroyPipelineLayout(m_pDeviceContext->device, m_forwardPipelineLayout, nullptr);
 	vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_forwardObjectDataSetLayout, nullptr);
@@ -315,8 +498,8 @@ void ForwardRenderer::render(Scene const& scene)
 		uint32_t backbufferIndex = m_pDeviceContext->getCurrentBackbufferIndex();
 
 		VkClearValue clearValues[] = {
-			{{ 0.3F, 0.6F, 0.9F, 1.0F }},
-			{{ 1.0F, 0x00 }},
+			VkClearValue{{ 0.3F, 0.6F, 0.9F, 1.0F }},
+			VkClearValue{{ 1.0F, 0x00 }},
 		};
 
 		VkRenderPassBeginInfo forwardPassBeginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };

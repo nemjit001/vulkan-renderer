@@ -17,15 +17,16 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 	- [ ] Camera controller
 - [ ] Scene loading (glTF2.0)
 - [ ] Lights
-	- [X] Sun light (directional)
+	- [ ] Sun light (directional)
 	- [ ] Multiple point lights
 - [ ] Render pipeline
 	- [ ] Shadow mapping pass
 		- [ ] Sun only, cascaded
 		- [ ] Point lights
-	- [X] Depth prepass
-	- [ ] PBR materials
+	- [ ] Depth prepass
+	- [ ] Forward opaque pass
 	- [ ] Transparency pass
+- [ ] PBR materials
 - [ ] Animations
 	- [ ] Linear skinning
 	- [ ] Blend shapes

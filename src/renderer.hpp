@@ -108,7 +108,7 @@ protected:
 	VkDescriptorSetLayout m_forwardObjectDataSetLayout = VK_NULL_HANDLE;
 	VkPipelineLayout m_forwardPipelineLayout = VK_NULL_HANDLE;
 
-	VkPipelineLayout m_forwardOpaquePipeline = VK_NULL_HANDLE;
+	VkPipeline m_forwardOpaquePipeline = VK_NULL_HANDLE;
 
 	VkDescriptorPool m_forwardDescriptorPool = VK_NULL_HANDLE;
 };
