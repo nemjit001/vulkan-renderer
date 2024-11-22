@@ -13,5 +13,6 @@ layout(location = 0) out vec4 f_FragColor;
 
 void main()
 {
-	f_FragColor = vec4(i_Color, 1.0);
+	vec3 N = normalize(i_TBN * vec3(0, 0, 1));
+	f_FragColor = vec4(0.5 + 0.5 * N, 1.0);
 }

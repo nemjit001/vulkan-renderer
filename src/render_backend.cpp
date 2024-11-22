@@ -48,11 +48,6 @@ void Texture::destroy()
 
 bool Texture::initDefaultView(VkImageViewType viewType, VkImageAspectFlags aspectMask)
 {
-    if (view != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, view, nullptr);
-        view = VK_NULL_HANDLE;
-    }
-
     VkImageViewCreateInfo viewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     viewCreateInfo.image = handle;
     viewCreateInfo.viewType = viewType;
@@ -101,6 +96,13 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
         VkPhysicalDeviceFeatures2 enabledFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
         enabledFeatures.features.samplerAnisotropy = VK_TRUE;
         enabledFeatures.features.depthBounds = VK_TRUE;
+
+        VkPhysicalDeviceVulkan11Features enabledFeatures11{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES };
+        enabledFeatures.pNext = &enabledFeatures11;
+
+        VkPhysicalDeviceVulkan12Features enabledFeatures12{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+        enabledFeatures12.descriptorIndexing = VK_TRUE;
+        enabledFeatures11.pNext = &enabledFeatures12;
 
         VkDeviceCreateInfo deviceCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
         deviceCreateInfo.flags = 0;
@@ -376,8 +378,7 @@ bool RenderDeviceContext::resizeSwapResources(uint32_t width, uint32_t height)
         }
 
         m_backbuffers.reserve(m_swapImages.size());
-        for (uint32_t i = 0; i < m_swapImages.size(); i++)
-        {
+        for (uint32_t i = 0; i < m_swapImages.size(); i++) {
             m_backbuffers.push_back(Backbuffer{ m_swapchainCreateInfo.imageFormat, m_swapImages[i], m_swapImageViews[i] });
         }
     }
@@ -792,7 +793,11 @@ namespace RenderBackend
         for (auto& device : physicalDevices)
         {
             VkPhysicalDeviceFeatures2 deviceFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-            deviceFeatures.pNext = nullptr;
+            VkPhysicalDeviceVulkan11Features deviceFeatures11{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES };
+            VkPhysicalDeviceVulkan12Features deviceFeatures12{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+            deviceFeatures.pNext = &deviceFeatures11;
+            deviceFeatures11.pNext = &deviceFeatures12;
+
             vkGetPhysicalDeviceFeatures2(device, &deviceFeatures);
 
             VkPhysicalDeviceProperties2 deviceProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
@@ -800,7 +805,8 @@ namespace RenderBackend
             vkGetPhysicalDeviceProperties2(device, &deviceProperties);
 
             if (deviceFeatures.features.samplerAnisotropy == VK_TRUE
-                && deviceFeatures.features.depthBounds == VK_TRUE)
+                && deviceFeatures.features.depthBounds == VK_TRUE
+                && deviceFeatures12.descriptorIndexing == VK_TRUE)
             {
                 physicalDevice = device;
                 printf("Automatically selected render device: %s\n", deviceProperties.properties.deviceName);

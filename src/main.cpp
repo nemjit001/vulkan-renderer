@@ -79,7 +79,7 @@ namespace Engine
             return false;
         }
 
-        pRenderer = new ForwardRenderer(pDeviceContext);
+        pRenderer = new ForwardRenderer(pDeviceContext, framebufferWidth, framebufferHeight);
         if (pRenderer == nullptr)
         {
             printf("VK Renderer renderer init failed\n");
@@ -175,13 +175,21 @@ namespace Engine
             return;
         }
 
-        framebufferWidth = static_cast<uint32_t>(width);
-        framebufferHeight = static_cast<uint32_t>(height);
-        if (!pRenderer->onResize(framebufferWidth, framebufferHeight)) {
+        framebufferWidth = static_cast<uint32_t>(std::max(width, 1));
+        framebufferHeight = static_cast<uint32_t>(std::max(height, 1));
+        pRenderer->awaitFrame();
+
+        if (!pDeviceContext->resizeSwapResources(framebufferWidth, framebufferHeight)) {
             isRunning = false;
+            return;
         }
 
-        printf("Window resized (%d x %d)\n", width, height);
+        if (!pRenderer->onResize(framebufferWidth, framebufferHeight)) {
+            isRunning = false;
+            return;
+        }
+
+        printf("Window resized (%d x %d)\n", framebufferWidth, framebufferHeight);
     }
 
     void update()
@@ -229,7 +237,7 @@ namespace Engine
         }
 
         pRenderer->render(scene);
-        if (pDeviceContext->present()) {
+        if (!pDeviceContext->present()) {
             resize();
         }
 
