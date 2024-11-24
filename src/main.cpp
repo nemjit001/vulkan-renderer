@@ -95,6 +95,9 @@ namespace Engine
             camera.perspective.zNear = 0.01F;
             camera.perspective.zFar = 100.0F;
             SceneRef cameraRef = scene.addCamera(camera);
+            SceneRef cameraNode = scene.createNode("Camera", Transform{ { 0.0F, 0.0F, -5.0F } });
+            scene.nodes.cameraRef[cameraNode] = cameraRef;
+            scene.activeCamera = cameraNode;
 
             Mesh cubeMesh{};
             if (!loadOBJ(pDeviceContext, "data/assets/cube.obj", cubeMesh)) {
@@ -133,16 +136,12 @@ namespace Engine
 
             SceneRef cubeObjectRef = scene.addObject(cubeMeshRef, brickMaterialRef);
             SceneRef suzanneObjectRef = scene.addObject(suzanneMeshRef, brickMaterialRef);
-
-            SceneRef cameraNode = scene.createNode("Camera", Transform{ { 0.0F, 0.0F, -5.0F } });
             SceneRef cubeNode = scene.createNode("Cube", Transform{ { -2.0F, 0.0F, 0.0F } });
             SceneRef suzanneNode = scene.createNode("Suzanne", Transform{ { 2.0F, 0.0F, 0.0F } });
 
             // FIXME(nemjit001): fix this with a "normal" scene API (this is kinda gross).
-            scene.nodes.cameraRef[cameraNode] = cameraRef;
             scene.nodes.objectRef[cubeNode] = cubeObjectRef;
             scene.nodes.objectRef[suzanneNode] = suzanneObjectRef;
-            scene.activeCamera = cameraNode;
         }
 
         printf("Initialized Vulkan Renderer\n");
@@ -268,6 +267,9 @@ namespace Engine
 
         ImGui::Render();
 
+        // Update active camera aspect ratio
+        SceneRef const activeCamera = scene.nodes.cameraRef[scene.activeCamera];
+        scene.cameras[activeCamera].perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
         pRenderer->update(scene);
         cpuUpdateTimer.tick();
 
