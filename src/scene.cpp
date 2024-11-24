@@ -16,6 +16,11 @@ SceneRef Scene::addMesh(Mesh const& mesh)
 
 SceneRef Scene::addTexture(Texture const& texture)
 {
+    if (textures.size() + 1 > MaxTextures) {
+        printf("Scene max textures reached\n");
+        return RefUnused;
+    }
+
     SceneRef ref = static_cast<SceneRef>(textures.size());
     textures.push_back(texture);
     return ref;
