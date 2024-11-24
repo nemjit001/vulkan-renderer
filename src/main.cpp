@@ -142,6 +142,7 @@ namespace Engine
             scene.nodes.cameraRef[cameraNode] = cameraRef;
             scene.nodes.objectRef[cubeNode] = cubeObjectRef;
             scene.nodes.objectRef[suzanneNode] = suzanneObjectRef;
+            scene.activeCamera = cameraNode;
         }
 
         printf("Initialized Vulkan Renderer\n");
@@ -151,6 +152,7 @@ namespace Engine
     void shutdown()
     {
         printf("Shutting down Vulkan Renderer\n");
+        pRenderer->awaitFrame();
 
         scene.clear();
         delete pRenderer;
@@ -192,10 +194,37 @@ namespace Engine
         printf("Window resized (%d x %d)\n", framebufferWidth, framebufferHeight);
     }
 
+    void render()
+    {
+        if (!pDeviceContext->newFrame())
+        {
+            resize();
+            return;
+        }
+
+        cpuRenderTimer.reset();
+        pRenderer->render(scene);
+        cpuRenderTimer.tick();
+
+        if (!pDeviceContext->present()) {
+            resize();
+        }
+        return;
+    }
+
     void update()
     {
         // Tick frame timer
         frameTimer.tick();
+
+        // Get last update times
+        static RunningAverage avgFrameTime(25);
+        static RunningAverage avgCPUUpdateTime(25);
+        static RunningAverage avgCPURenderTime(25);
+        avgFrameTime.update(frameTimer.deltaTimeMS());
+        avgCPUUpdateTime.update(cpuUpdateTimer.deltaTimeMS());
+        avgCPURenderTime.update(cpuRenderTimer.deltaTimeMS());
+
         cpuUpdateTimer.reset();
 
         // Update window state
@@ -224,24 +253,25 @@ namespace Engine
             }
         }
 
+        ImGui_ImplSDL2_NewFrame();
+        ImGui_ImplVulkan_NewFrame();
+        ImGui::NewFrame();
+
+        if (ImGui::Begin("Vulkan Renderer Config"))
+        {
+            ImGui::SeparatorText("Statistics");
+            ImGui::Text("Frame time:        %10.2f ms", avgFrameTime.getAverage());
+            ImGui::Text("- CPU update time: %10.2f ms", avgCPUUpdateTime.getAverage());
+            ImGui::Text("- CPU render time: %10.2f ms", avgCPURenderTime.getAverage());
+        }
+        ImGui::End();
+
+        ImGui::Render();
+
         pRenderer->update(scene);
         cpuUpdateTimer.tick();
-    }
 
-    void render()
-    {
-        if (!pDeviceContext->newFrame())
-        {
-            resize();
-            return;
-        }
-
-        pRenderer->render(scene);
-        if (!pDeviceContext->present()) {
-            resize();
-        }
-
-        return;
+        Engine::render();
     }
 } // namespace Engine
 
@@ -253,10 +283,8 @@ int main()
         return 1;
     }
 
-    while (Engine::isRunning)
-    {
+    while (Engine::isRunning) {
         Engine::update();
-        Engine::render();
     }
 
     Engine::shutdown();

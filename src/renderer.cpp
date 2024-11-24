@@ -3,10 +3,12 @@
 #include <cassert>
 #include <stdexcept>
 
+#include <imgui_impl_vulkan.h>
 #include <volk.h>
 
 #include "assets.hpp"
 #include "mesh.hpp"
+#include "scene.hpp"
 
 IRenderer::IRenderer(RenderDeviceContext* pDeviceContext)
 	:
@@ -172,31 +174,62 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 
 		// Create forward pipeline descriptor set layouts
 		{
+			VkDescriptorSetLayoutBinding cameraDataBinding{};
+			cameraDataBinding.binding = 0;
+			cameraDataBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			cameraDataBinding.descriptorCount = 1;
+			cameraDataBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+			cameraDataBinding.pImmutableSamplers = nullptr;
+
+			VkDescriptorSetLayoutBinding textureArrayBinding{};
+			textureArrayBinding.binding = 1;
+			textureArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			textureArrayBinding.descriptorCount = Scene::MaxTextures;
+			textureArrayBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+			textureArrayBinding.pImmutableSamplers = nullptr;
+
+			VkDescriptorSetLayoutBinding sceneDataBindings[] = { cameraDataBinding, textureArrayBinding, };
 			VkDescriptorSetLayoutCreateInfo sceneDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 			sceneDataSetLayout.flags = 0;
-			sceneDataSetLayout.bindingCount = 0;
-			sceneDataSetLayout.pBindings = nullptr;
+			sceneDataSetLayout.bindingCount = SIZEOF_ARRAY(sceneDataBindings);
+			sceneDataSetLayout.pBindings = sceneDataBindings;
 
+			VkDescriptorSetLayoutBinding materialDataBinding{};
+			materialDataBinding.binding = 0;
+			materialDataBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			materialDataBinding.descriptorCount = 1;
+			materialDataBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+			materialDataBinding.pImmutableSamplers = nullptr;
+
+			VkDescriptorSetLayoutBinding materialDataBindings[] = { materialDataBinding, };
 			VkDescriptorSetLayoutCreateInfo materialDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 			materialDataSetLayout.flags = 0;
-			materialDataSetLayout.bindingCount = 0;
-			materialDataSetLayout.pBindings = nullptr;
+			materialDataSetLayout.bindingCount = SIZEOF_ARRAY(materialDataBindings);
+			materialDataSetLayout.pBindings = materialDataBindings;
 
+			VkDescriptorSetLayoutBinding objectDataBinding{};
+			objectDataBinding.binding = 0;
+			objectDataBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			objectDataBinding.descriptorCount = 1;
+			objectDataBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+			objectDataBinding.pImmutableSamplers = nullptr;
+
+			VkDescriptorSetLayoutBinding objectDataBindings[] = { objectDataBinding, };
 			VkDescriptorSetLayoutCreateInfo objectDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 			objectDataSetLayout.flags = 0;
-			objectDataSetLayout.bindingCount = 0;
-			objectDataSetLayout.pBindings = nullptr;
+			objectDataSetLayout.bindingCount = SIZEOF_ARRAY(objectDataBindings);
+			objectDataSetLayout.pBindings = objectDataBindings;
 
-			if (VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &sceneDataSetLayout, nullptr, &m_forwardSceneDataSetLayout))
-				|| VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &materialDataSetLayout, nullptr, &m_forwardMaterialDataSetLayout))
-				|| VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &objectDataSetLayout, nullptr, &m_forwardObjectDataSetLayout))) {
+			if (VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &sceneDataSetLayout, nullptr, &m_sceneDataSetLayout))
+				|| VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &materialDataSetLayout, nullptr, &m_materialDataSetLayout))
+				|| VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &objectDataSetLayout, nullptr, &m_objectDataSetLayout))) {
 				throw std::runtime_error("Forward Renderer forward descriptor set layout create failed\n");
 			}
 		}
 
 		// Create forward pipeline layout
 		{
-			VkDescriptorSetLayout setLayouts[] = { m_forwardSceneDataSetLayout, m_forwardMaterialDataSetLayout, m_forwardObjectDataSetLayout, };
+			VkDescriptorSetLayout setLayouts[] = { m_sceneDataSetLayout, m_materialDataSetLayout, m_objectDataSetLayout, };
 			VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 			pipelineLayoutCreateInfo.flags = 0;
 			pipelineLayoutCreateInfo.setLayoutCount = SIZEOF_ARRAY(setLayouts);
@@ -209,7 +242,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			}
 		}
 
-		// Create forward graphics pipelines
+		// Create forward graphics pipeline
 		{
 			std::vector<uint32_t> forwardVertCode{};
 			std::vector<uint32_t> forwardFragCode{};
@@ -378,20 +411,59 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			vkDestroyShaderModule(m_pDeviceContext->device, forwardFragModule, nullptr);
 			vkDestroyShaderModule(m_pDeviceContext->device, forwardVertModule, nullptr);
 		}
+	}
 
-		// Create forward descriptor pool
-		{
-			uint32_t const maxSets = 1;
+	// Create uniform buffers
+	{
+		size_t sceneDataBufferSize = sizeof(UniformCameraData);
+		size_t materialBufferSize = sizeof(UniformMaterialData);
+		size_t objectBufferSize = sizeof(UniformObjectData);
 
-			VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-			descriptorPoolCreateInfo.flags = 0;
-			descriptorPoolCreateInfo.maxSets = maxSets;
-			descriptorPoolCreateInfo.poolSizeCount = 0;
-			descriptorPoolCreateInfo.pPoolSizes = nullptr;
+		if (!m_pDeviceContext->createBuffer(m_sceneDataBuffer, sceneDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+			|| !m_pDeviceContext->createBuffer(m_materialDataBuffer, materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+			|| !m_pDeviceContext->createBuffer(m_objectDataBuffer, objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+			throw std::runtime_error("Forward Renderer uniform buffer create failed");
+		}
+	}
 
-			if (VK_FAILED(vkCreateDescriptorPool(m_pDeviceContext->device, &descriptorPoolCreateInfo, nullptr, &m_forwardDescriptorPool))) {
-				throw std::runtime_error("Forward Renderer forward descriptor pool create failed\n");
-			}
+	// Create GUI descriptor pool & init ImGui
+	{
+		VkDescriptorPoolSize guiPoolSizes[] = {
+			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
+		};
+
+		VkDescriptorPoolCreateInfo guiPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+		guiPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+		guiPoolCreateInfo.maxSets = 1;
+		guiPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(guiPoolSizes);
+		guiPoolCreateInfo.pPoolSizes = guiPoolSizes;
+
+		if (VK_FAILED(vkCreateDescriptorPool(m_pDeviceContext->device, &guiPoolCreateInfo, nullptr, &m_guiDescriptorPool))) {
+			throw std::runtime_error("Forward Renderer ImGUI descriptor pool create failed");
+		}
+
+		ImGui_ImplVulkan_InitInfo initInfo{};
+		initInfo.Instance = RenderBackend::getInstance();
+		initInfo.PhysicalDevice = m_pDeviceContext->getAdapter();
+		initInfo.Device = m_pDeviceContext->device;
+		initInfo.QueueFamily = m_pDeviceContext->getQueueFamily(CommandQueueType::Direct);
+		initInfo.Queue = m_pDeviceContext->directQueue;
+		initInfo.DescriptorPool = m_guiDescriptorPool;
+		initInfo.RenderPass = m_forwardRenderPass;
+		initInfo.MinImageCount = m_pDeviceContext->backbufferCount();
+		initInfo.ImageCount = m_pDeviceContext->backbufferCount();
+		initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+		initInfo.PipelineCache = VK_NULL_HANDLE;
+		initInfo.Subpass = 0;
+
+		auto loaderFunc = [](char const* pName, void* pUserData) {
+			(void)(pUserData);
+			return vkGetInstanceProcAddr(RenderBackend::getInstance(), pName);
+		};
+
+		if (!ImGui_ImplVulkan_LoadFunctions(loaderFunc)
+			|| !ImGui_ImplVulkan_Init(&initInfo)) {
+			throw std::runtime_error("Forward Renderer ImGUI init failed");
 		}
 	}
 }
@@ -399,21 +471,35 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 ForwardRenderer::~ForwardRenderer()
 {
 	// Await previous frame to be finished
-	vkWaitForFences(m_pDeviceContext->device, 1, &m_frameCommandsFinished, VK_TRUE, UINT64_MAX);
+	awaitFrame();
 
-	// Destroy forward rendering members
-	vkDestroyDescriptorPool(m_pDeviceContext->device, m_forwardDescriptorPool, nullptr);
+	ImGui_ImplVulkan_Shutdown();
 
+	m_objectSets.clear();
+	m_materialSets.clear();
+	m_sceneSet = VK_NULL_HANDLE;
+	vkDestroyDescriptorPool(m_pDeviceContext->device, m_descriptorPool, nullptr);
+
+	vkDestroyDescriptorPool(m_pDeviceContext->device, m_guiDescriptorPool, nullptr);
+
+	m_objectDataBuffer.destroy();
+	m_materialDataBuffer.destroy();
+	m_sceneDataBuffer.destroy();
+
+	// Destroy forward rendering pipeline
 	vkDestroyPipeline(m_pDeviceContext->device, m_forwardOpaquePipeline, nullptr);
-
 	vkDestroyPipelineLayout(m_pDeviceContext->device, m_forwardPipelineLayout, nullptr);
-	vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_forwardObjectDataSetLayout, nullptr);
-	vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_forwardMaterialDataSetLayout, nullptr);
-	vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_forwardSceneDataSetLayout, nullptr);
 
+	// Destroy layouts
+	vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_objectDataSetLayout, nullptr);
+	vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_materialDataSetLayout, nullptr);
+	vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_sceneDataSetLayout, nullptr);
+
+	// Destroy samplers
 	vkDestroySampler(m_pDeviceContext->device, m_textureSampler, nullptr);
 	vkDestroySampler(m_pDeviceContext->device, m_shadowmapSampler, nullptr);
 
+	// Destroy forward pass data
 	for (auto& framebuffer : m_forwardFramebuffers) {
 		vkDestroyFramebuffer(m_pDeviceContext->device, framebuffer, nullptr);
 	}
@@ -478,27 +564,237 @@ bool ForwardRenderer::onResize(uint32_t width, uint32_t height)
 
 void ForwardRenderer::update(Scene const& scene)
 {
-	// TODO(nemjit001): preprocess scene data, create descriptor sets, upload to uniform buffers, etc.
+	awaitFrame(); // FIXME(nemjit001): Frame sync should really happen outside of renderer
+
+	// Check uniform buffer sizes & recreate buffers if needed
+	size_t const materialBufferSize = scene.materials.size() * sizeof(UniformMaterialData);
+	size_t const objectBufferSize = scene.nodes.count * sizeof(UniformObjectData);
+	
+	if (materialBufferSize > m_materialDataBuffer.size)
+	{
+		m_materialDataBuffer.destroy();
+		if (!m_pDeviceContext->createBuffer(m_materialDataBuffer, materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+			throw std::runtime_error("Forward Renderer update uniform material buffer resize failed\n");
+		}
+
+		printf("Forward Renderer material uniform resized: %zu bytes\n", m_materialDataBuffer.size);
+	}
+
+	if (objectBufferSize > m_objectDataBuffer.size)
+	{
+		m_objectDataBuffer.destroy();
+		if (!m_pDeviceContext->createBuffer(m_objectDataBuffer, objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+			throw std::runtime_error("Forward Renderer update uniform object buffer resize failed\n");
+		}
+
+		printf("Forward Renderer object uniform resized: %zu bytes\n", m_objectDataBuffer.size);
+	}
+
+	// Upload uniform camera data
+	Transform const& transform = scene.nodes.transform[scene.activeCamera];
+	glm::mat4 const& camTransform = transform.matrix();
+	glm::vec3 const camForward = glm::vec3(camTransform * glm::vec4(FORWARD, 0.0));
+	glm::vec3 const camUp = glm::vec3(camTransform * glm::vec4(UP, 0.0));
+	glm::mat4 const view = glm::lookAt(transform.position, transform.position + camForward, camUp);
+
+	UniformCameraData cameraData{};
+	cameraData.position = scene.nodes.transform[scene.activeCamera].position;
+	cameraData.matrix = scene.cameras[scene.nodes.cameraRef[scene.activeCamera]].matrix() * view;
+
+	m_sceneDataBuffer.map();
+	memcpy(m_sceneDataBuffer.pData, &cameraData, sizeof(UniformCameraData));
+	m_sceneDataBuffer.unmap();
+
+	// Upload uniform material data
+	std::vector<UniformMaterialData> materialData{};
+	materialData.reserve(scene.materials.size());
+	for (size_t i = 0; i < scene.materials.size(); i++)
+	{
+		Material const& mat = scene.materials[i];
+		materialData.emplace_back(UniformMaterialData{
+			mat.defaultAlbedo,
+			mat.defaultSpecular,
+			mat.albedoTexture,
+			mat.specularTexture,
+			mat.normalTexture
+		});
+	}
+	m_materialDataBuffer.map();
+	memcpy(m_materialDataBuffer.pData, materialData.data(), m_materialDataBuffer.size);
+	m_materialDataBuffer.unmap();
+
+	// Upload uniform object data
+	std::vector<UniformObjectData> objectData{};
+	objectData.reserve(scene.nodes.count);
+	for (size_t i = 0; i < scene.nodes.count; i++)
+	{
+		glm::mat4 model = scene.nodes.transform[i].matrix();
+		glm::mat4 normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(model))));
+		objectData.emplace_back(UniformObjectData{ model, normal });
+	}
+	m_objectDataBuffer.map();
+	memcpy(m_objectDataBuffer.pData, objectData.data(), m_objectDataBuffer.size);
+	m_objectDataBuffer.unmap();
+
+	// Size descriptor set arrays for this frame & recreate descriptor pool
+	m_materialSets.resize(scene.materials.size());
+	m_objectSets.resize(scene.nodes.count);
+
+	uint32_t maxDescriptorSets = static_cast<uint32_t>(1 + m_materialSets.size() + m_objectSets.size());
+	VkDescriptorPoolSize poolSizes[] = {
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * maxDescriptorSets },
+		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 * maxDescriptorSets },
+	};
+
+	VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	descriptorPoolCreateInfo.flags = 0;
+	descriptorPoolCreateInfo.maxSets = maxDescriptorSets;
+	descriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
+	descriptorPoolCreateInfo.pPoolSizes = poolSizes;
+
+	vkDestroyDescriptorPool(m_pDeviceContext->device, m_descriptorPool, nullptr);
+	if (VK_FAILED(vkCreateDescriptorPool(m_pDeviceContext->device, &descriptorPoolCreateInfo, nullptr, &m_descriptorPool))) {
+		throw std::runtime_error("Forward Renderer update descriptor pool realloc failed");
+	}
+
+	// Allocate descriptor sets
+	std::vector<VkDescriptorSetLayout> const materialSetLayouts(m_materialSets.size(), m_materialDataSetLayout);
+	std::vector<VkDescriptorSetLayout> const objectSetLayouts(m_objectSets.size(), m_objectDataSetLayout);
+
+	VkDescriptorSetAllocateInfo sceneSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	sceneSetAllocInfo.descriptorPool = m_descriptorPool;
+	sceneSetAllocInfo.descriptorSetCount = 1;
+	sceneSetAllocInfo.pSetLayouts = &m_sceneDataSetLayout;
+
+	VkDescriptorSetAllocateInfo materialSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	materialSetAllocInfo.descriptorPool = m_descriptorPool;
+	materialSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_materialSets.size());
+	materialSetAllocInfo.pSetLayouts = materialSetLayouts.data();
+
+	VkDescriptorSetAllocateInfo objectSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	objectSetAllocInfo.descriptorPool = m_descriptorPool;
+	objectSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_objectSets.size());
+	objectSetAllocInfo.pSetLayouts = objectSetLayouts.data();
+
+	if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &sceneSetAllocInfo, &m_sceneSet))
+		|| VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &materialSetAllocInfo, m_materialSets.data()))
+		|| VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &objectSetAllocInfo, m_objectSets.data()))) {
+		throw std::runtime_error("Forward Renderer update descriptor set alloc failed");
+	}
+
+	// Update all descriptor sets in frame (scene data, texture array, material data, object data)
+	std::vector<VkDescriptorImageInfo> imageInfos{};
+	std::vector<VkDescriptorBufferInfo> bufferInfos{};
+	std::vector<VkWriteDescriptorSet> descriptorWrites{};
+	imageInfos.reserve(scene.textures.size());
+	bufferInfos.reserve(2 + scene.materials.size() + scene.nodes.count);
+	descriptorWrites.reserve(2 + scene.materials.size() + scene.nodes.count);
+
+	VkDescriptorBufferInfo cameraDataBufferInfo{};
+	cameraDataBufferInfo.buffer = m_sceneDataBuffer.handle;
+	cameraDataBufferInfo.offset = 0;
+	cameraDataBufferInfo.range = sizeof(UniformCameraData);
+	bufferInfos.emplace_back(cameraDataBufferInfo);
+
+	VkWriteDescriptorSet cameraDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	cameraDataWrite.dstSet = m_sceneSet;
+	cameraDataWrite.dstBinding = 0;
+	cameraDataWrite.dstArrayElement = 0;
+	cameraDataWrite.descriptorCount = 1;
+	cameraDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	cameraDataWrite.pBufferInfo = &bufferInfos.back();
+	descriptorWrites.emplace_back(cameraDataWrite);
+
+	for (size_t textureIdx = 0; textureIdx < scene.textures.size(); textureIdx++)
+	{
+		VkDescriptorImageInfo textureImageInfo{};
+		textureImageInfo.sampler = m_textureSampler;
+		textureImageInfo.imageView = scene.textures[textureIdx].view;
+		textureImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imageInfos.emplace_back(textureImageInfo);
+		
+		VkWriteDescriptorSet textureWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		textureWrite.dstSet = m_sceneSet;
+		textureWrite.dstBinding = 1;
+		textureWrite.dstArrayElement = static_cast<uint32_t>(textureIdx);
+		textureWrite.descriptorCount = 1;
+		textureWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		textureWrite.pImageInfo = &imageInfos.back();
+		descriptorWrites.emplace_back(textureWrite);
+	}
+
+	for (size_t materialIdx = 0; materialIdx < scene.materials.size(); materialIdx++)
+	{
+		VkDescriptorBufferInfo materialDataBufferInfo{};
+		materialDataBufferInfo.buffer = m_materialDataBuffer.handle;
+		materialDataBufferInfo.offset = materialIdx * sizeof(UniformMaterialData);
+		materialDataBufferInfo.range = sizeof(UniformMaterialData);
+		bufferInfos.emplace_back(materialDataBufferInfo);
+
+		VkWriteDescriptorSet materialDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		materialDataWrite.dstSet = m_materialSets[materialIdx];
+		materialDataWrite.dstBinding = 0;
+		materialDataWrite.dstArrayElement = 0;
+		materialDataWrite.descriptorCount = 1;
+		materialDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		materialDataWrite.pBufferInfo = &bufferInfos.back();
+		descriptorWrites.emplace_back(materialDataWrite);
+	}
+
+	for (size_t nodeIdx = 0; nodeIdx < scene.nodes.count; nodeIdx++)
+	{
+		VkDescriptorBufferInfo objectDataBufferInfo{};
+		objectDataBufferInfo.buffer = m_objectDataBuffer.handle;
+		objectDataBufferInfo.offset = nodeIdx * sizeof(UniformObjectData);
+		objectDataBufferInfo.range = sizeof(UniformObjectData);
+		bufferInfos.emplace_back(objectDataBufferInfo);
+
+		VkWriteDescriptorSet objectDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		objectDataWrite.dstSet = m_objectSets[nodeIdx];
+		objectDataWrite.dstBinding = 0;
+		objectDataWrite.dstArrayElement = 0;
+		objectDataWrite.descriptorCount = 1;
+		objectDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		objectDataWrite.pBufferInfo = &bufferInfos.back();
+		descriptorWrites.emplace_back(objectDataWrite);
+	}
+	vkUpdateDescriptorSets(m_pDeviceContext->device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+
+	// Sort object draws by material to reduce state changes in draw
+	m_drawData.clear();
+	for (uint32_t nodeIdx = 0; nodeIdx < scene.nodes.count; nodeIdx++)
+	{
+		SceneRef const objectRef = scene.nodes.objectRef[nodeIdx];
+		assert(objectRef == RefUnused || objectRef < scene.objects.count);
+		if (objectRef == RefUnused) {
+			continue;
+		}
+
+		SceneRef const meshRef = scene.objects.meshRef[objectRef];
+		SceneRef const materialRef = scene.objects.materialRef[objectRef];
+		if (meshRef == RefUnused || materialRef == RefUnused) {
+			continue;
+		}
+
+		m_drawData[materialRef].emplace_back(nodeIdx);
+	}
 }
 
 void ForwardRenderer::render(Scene const& scene)
 {
-	awaitFrame();
+	awaitFrame(); //< FIXME(nemjit001): set frame sync either in update or outside of renderer
 
 	VkCommandBufferBeginInfo frameBeginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	frameBeginInfo.flags = 0;
 	frameBeginInfo.pInheritanceInfo = nullptr;
 	vkBeginCommandBuffer(m_frameCommands.handle, &frameBeginInfo);
 
-	// Render shadowmapping pass (per light that might shadow map, record scene)
-	// TODO(nemjit001): render shadow mapping pass
-
 	// Render forward pass
 	{
 		uint32_t backbufferIndex = m_pDeviceContext->getCurrentBackbufferIndex();
 
 		VkClearValue clearValues[] = {
-			VkClearValue{{ 0.3F, 0.6F, 0.9F, 1.0F }},
+			VkClearValue{{ 0.1F, 0.1F, 0.1F, 1.0F }},
 			VkClearValue{{ 1.0F, 0x00 }},
 		};
 
@@ -509,8 +805,55 @@ void ForwardRenderer::render(Scene const& scene)
 		forwardPassBeginInfo.clearValueCount = SIZEOF_ARRAY(clearValues);
 		forwardPassBeginInfo.pClearValues = clearValues;
 		vkCmdBeginRenderPass(m_frameCommands.handle, &forwardPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-		// TODO(nemjit001): render scene data using forward pipeline here
+		
+		// Set viewport & scissor
+		float viewportWidth = static_cast<float>(m_framebufferWidth);
+		float viewportHeight = static_cast<float>(m_framebufferHeight);
+		VkViewport viewport = { 0.0F, viewportHeight, viewportWidth, -viewportHeight, 0.0F, 1.0F };
+		VkRect2D scissor = { { 0, 0 }, { m_framebufferWidth, m_framebufferHeight } };
+		vkCmdSetViewport(m_frameCommands.handle, 0, 1, &viewport);
+		vkCmdSetScissor(m_frameCommands.handle, 0, 1, &scissor);
 
+		// Render forward opaque objects
+		vkCmdBindPipeline(m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_forwardOpaquePipeline);
+		vkCmdBindDescriptorSets( // Bind scene data set
+			m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_forwardPipelineLayout,
+			0, 1, &m_sceneSet,
+			0, nullptr
+		);
+
+		for (auto const& kvp : m_drawData)
+		{
+			uint32_t materialIdx = kvp.first;
+			vkCmdBindDescriptorSets( // Bind material data set
+				m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_forwardPipelineLayout,
+				1, 1, &m_materialSets[materialIdx],
+				0, nullptr
+			);
+
+			for (uint32_t nodeIdx : kvp.second)
+			{
+				vkCmdBindDescriptorSets( // Bind object data set
+					m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_forwardPipelineLayout,
+					2, 1, &m_objectSets[nodeIdx],
+					0, nullptr
+				);
+
+				SceneRef const objectRef = scene.nodes.objectRef[nodeIdx];
+				assert(objectRef != RefUnused);
+
+				SceneRef const meshRef = scene.objects.meshRef[objectRef];
+				assert(meshRef != RefUnused);
+
+				Mesh const& mesh = scene.meshes[meshRef];
+				VkDeviceSize const offsets[] = { 0, };
+				vkCmdBindVertexBuffers(m_frameCommands.handle, 0, 1, &mesh.vertexBuffer.handle, offsets);
+				vkCmdBindIndexBuffer(m_frameCommands.handle, mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+				vkCmdDrawIndexed(m_frameCommands.handle, mesh.indexCount, 1, 0, 0, 0);
+			}
+		}
+
+		ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), m_frameCommands.handle);
 		vkCmdEndRenderPass(m_frameCommands.handle);
 	}
 

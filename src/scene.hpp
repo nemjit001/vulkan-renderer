@@ -45,6 +45,10 @@ public:
     void clear();
 
 public:
+    static constexpr uint32_t MaxTextures = 1024; //< Required for descriptor indexing stuff
+
+    SceneRef activeCamera = RefUnused;
+
     std::vector<Camera> cameras{};
     std::vector<Mesh> meshes{};
     std::vector<Texture> textures{};

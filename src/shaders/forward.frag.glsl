@@ -3,8 +3,7 @@
 
 #extension GL_EXT_nonuniform_qualifier : enable
 
-#define GAMMA		2.2
-#define INV_GAMMA	1.0 / GAMMA
+#include "utils.glsl.h"
 
 layout(location = 0) in FS_IN
 {
@@ -47,11 +46,11 @@ void main()
 	vec3 normal = vec3(0, 0, 1);
 
 	if (material.albedoMapIndex != ~0) {
-		albedo = pow(texture(textureMaps[material.albedoMapIndex], i_TexCoord).rgb, vec3(GAMMA));
+		albedo = linear(texture(textureMaps[material.albedoMapIndex], i_TexCoord).rgb);
 	}
 
 	if (material.specularMapIndex != ~0) {
-		specular = pow(texture(textureMaps[material.specularMapIndex], i_TexCoord).rgb, vec3(GAMMA));
+		specular = linear(texture(textureMaps[material.albedoMapIndex], i_TexCoord).rgb);
 	}
 
 	if (material.normalMapIndex != ~0) {

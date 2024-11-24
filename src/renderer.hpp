@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "math.hpp"
@@ -52,7 +53,7 @@ protected:
 	struct UniformCameraData
 	{
 		alignas(16) glm::vec3 position;
-		alignas(16) glm::mat3 matrix;
+		alignas(16) glm::mat4 matrix;
 	};
 
 	/// @brief Uniform material parameters, aligned for use on the GPU.
@@ -81,34 +82,38 @@ protected:
 	VkFence m_frameCommandsFinished = VK_NULL_HANDLE;
 	CommandContext m_frameCommands{};
 
-	//-- Shadow mapping members --//
-	VkRenderPass m_shadowmappingRenderPass = VK_NULL_HANDLE;
-	std::vector<Texture> m_shadowmaps{};
-	std::vector<VkFramebuffer> m_shadowmappingFramebuffers{};
-
-	VkDescriptorSetLayout m_shadowmappingSceneDataSetLayout = VK_NULL_HANDLE;
-	VkDescriptorSetLayout m_shadowmappingObjectDataSetLayout = VK_NULL_HANDLE;
-	VkPipelineLayout m_shadowmappingPipelineLayout = VK_NULL_HANDLE;
-	VkPipeline m_shadowmappingPipeline = VK_NULL_HANDLE;
-
-	VkDescriptorPool m_shadowmappingDescriptorPool = VK_NULL_HANDLE;
-	std::vector<VkDescriptorSet> m_shadowmappingSceneDataSets{};
-	std::vector<VkDescriptorSet> m_shadowmappingObjectDataSets{};
-
-	//-- Forward rendering members --//
+	//-- Forward render pass data --//
 	VkRenderPass m_forwardRenderPass = VK_NULL_HANDLE;
 	Texture m_depthStencilTexture{};
 	std::vector<VkFramebuffer> m_forwardFramebuffers{};
 
+	//-- Samplers --//
 	VkSampler m_shadowmapSampler = VK_NULL_HANDLE;
 	VkSampler m_textureSampler = VK_NULL_HANDLE;
 
-	VkDescriptorSetLayout m_forwardSceneDataSetLayout = VK_NULL_HANDLE;
-	VkDescriptorSetLayout m_forwardMaterialDataSetLayout = VK_NULL_HANDLE;
-	VkDescriptorSetLayout m_forwardObjectDataSetLayout = VK_NULL_HANDLE;
-	VkPipelineLayout m_forwardPipelineLayout = VK_NULL_HANDLE;
+	//-- Descriptor layouts --//
+	VkDescriptorSetLayout m_sceneDataSetLayout = VK_NULL_HANDLE;
+	VkDescriptorSetLayout m_materialDataSetLayout = VK_NULL_HANDLE;
+	VkDescriptorSetLayout m_objectDataSetLayout = VK_NULL_HANDLE;
 
+	//-- Forward pipeline --//
+	VkPipelineLayout m_forwardPipelineLayout = VK_NULL_HANDLE;
 	VkPipeline m_forwardOpaquePipeline = VK_NULL_HANDLE;
 
-	VkDescriptorPool m_forwardDescriptorPool = VK_NULL_HANDLE;
+	//-- Uniform buffers --//
+	Buffer m_sceneDataBuffer{}; //< contains camera data.
+	Buffer m_materialDataBuffer{}; //< contains all materials in the scene.
+	Buffer m_objectDataBuffer{}; //< contains a node's transforms (model + normal matrix).
+
+	//-- GUI state management --//
+	VkDescriptorPool m_guiDescriptorPool = VK_NULL_HANDLE;
+
+	//-- Descriptor set management --//
+	VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
+	VkDescriptorSet m_sceneSet = VK_NULL_HANDLE;
+	std::vector<VkDescriptorSet> m_materialSets{};
+	std::vector<VkDescriptorSet> m_objectSets{};
+
+	//-- Optimized draw data --//
+	std::unordered_map<uint32_t, std::vector<uint32_t>> m_drawData; //< Material:Object[] mapping
 };
