@@ -470,9 +470,6 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 
 ForwardRenderer::~ForwardRenderer()
 {
-	// Await previous frame to be finished
-	awaitFrame();
-
 	ImGui_ImplVulkan_Shutdown();
 
 	m_objectSets.clear();
@@ -564,8 +561,6 @@ bool ForwardRenderer::onResize(uint32_t width, uint32_t height)
 
 void ForwardRenderer::update(Scene const& scene)
 {
-	awaitFrame(); // FIXME(nemjit001): Frame sync should really happen outside of renderer
-
 	// Check uniform buffer sizes & recreate buffers if needed
 	size_t const materialBufferSize = scene.materials.size() * sizeof(UniformMaterialData);
 	size_t const objectBufferSize = scene.nodes.count * sizeof(UniformObjectData);
@@ -640,24 +635,31 @@ void ForwardRenderer::update(Scene const& scene)
 	m_materialSets.resize(scene.materials.size());
 	m_objectSets.resize(scene.nodes.count);
 
-	uint32_t maxDescriptorSets = static_cast<uint32_t>(1 + m_materialSets.size() + m_objectSets.size());
-	VkDescriptorPoolSize poolSizes[] = {
-		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * maxDescriptorSets },
-		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 * maxDescriptorSets },
-	};
+	uint32_t requiredDescriptorSets = static_cast<uint32_t>(1 + m_materialSets.size() + m_objectSets.size());
+	if (requiredDescriptorSets > m_maxDescriptorSets) {
+		m_maxDescriptorSets = requiredDescriptorSets;
 
-	VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-	descriptorPoolCreateInfo.flags = 0;
-	descriptorPoolCreateInfo.maxSets = maxDescriptorSets;
-	descriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
-	descriptorPoolCreateInfo.pPoolSizes = poolSizes;
+		VkDescriptorPoolSize poolSizes[] = {
+			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * m_maxDescriptorSets },
+			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 * m_maxDescriptorSets },
+		};
 
-	vkDestroyDescriptorPool(m_pDeviceContext->device, m_descriptorPool, nullptr);
-	if (VK_FAILED(vkCreateDescriptorPool(m_pDeviceContext->device, &descriptorPoolCreateInfo, nullptr, &m_descriptorPool))) {
-		throw std::runtime_error("Forward Renderer update descriptor pool realloc failed");
+		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+		descriptorPoolCreateInfo.flags = 0;
+		descriptorPoolCreateInfo.maxSets = m_maxDescriptorSets;
+		descriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
+		descriptorPoolCreateInfo.pPoolSizes = poolSizes;
+
+		vkDestroyDescriptorPool(m_pDeviceContext->device, m_descriptorPool, nullptr);
+		if (VK_FAILED(vkCreateDescriptorPool(m_pDeviceContext->device, &descriptorPoolCreateInfo, nullptr, &m_descriptorPool))) {
+			throw std::runtime_error("Forward Renderer update descriptor pool realloc failed");
+		}
+
+		printf("Forward Renderer update reallocated descriptor pool (%u sets)\n", m_maxDescriptorSets);
 	}
 
-	// Allocate descriptor sets
+	// Reallocate descriptor sets
+	vkResetDescriptorPool(m_pDeviceContext->device, m_descriptorPool, /* no flags */ 0);
 	std::vector<VkDescriptorSetLayout> const materialSetLayouts(m_materialSets.size(), m_materialDataSetLayout);
 	std::vector<VkDescriptorSetLayout> const objectSetLayouts(m_objectSets.size(), m_objectDataSetLayout);
 
@@ -782,8 +784,6 @@ void ForwardRenderer::update(Scene const& scene)
 
 void ForwardRenderer::render(Scene const& scene)
 {
-	awaitFrame(); //< FIXME(nemjit001): set frame sync either in update or outside of renderer
-
 	VkCommandBufferBeginInfo frameBeginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	frameBeginInfo.flags = 0;
 	frameBeginInfo.pInheritanceInfo = nullptr;

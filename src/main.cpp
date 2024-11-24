@@ -128,8 +128,8 @@ namespace Engine
             SceneRef brickNormalRef = scene.addTexture(brickNormalTexture);
 
             Material defaultMaterial{};
-            defaultMaterial.defaultAlbedo = glm::vec3(1.0F, 0.0F, 0.0F);
-            defaultMaterial.defaultSpecular = glm::vec3(0.0F, 0.0F, 0.0F);
+            defaultMaterial.defaultAlbedo = glm::vec3(1.0F, 0.1F, 0.6F);
+            defaultMaterial.defaultSpecular = glm::vec3(0.5F);
             defaultMaterial.albedoTexture = brickAlbedoRef;
             defaultMaterial.normalTexture = brickNormalRef;
             SceneRef brickMaterialRef = scene.addMaterial(defaultMaterial);
@@ -213,7 +213,7 @@ namespace Engine
 
     void update()
     {
-        // Tick frame timer
+        pRenderer->awaitFrame();
         frameTimer.tick();
 
         // Get last update times

@@ -109,6 +109,7 @@ protected:
 	VkDescriptorPool m_guiDescriptorPool = VK_NULL_HANDLE;
 
 	//-- Descriptor set management --//
+	uint32_t m_maxDescriptorSets = 0;
 	VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
 	VkDescriptorSet m_sceneSet = VK_NULL_HANDLE;
 	std::vector<VkDescriptorSet> m_materialSets{};
