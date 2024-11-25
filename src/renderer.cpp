@@ -561,6 +561,10 @@ bool ForwardRenderer::onResize(uint32_t width, uint32_t height)
 
 void ForwardRenderer::update(Scene const& scene)
 {
+	// Check if scene has renderable data
+	// FIXME(nemjit001): Gracefully handle empty scenes pls
+	assert(!scene.empty());
+
 	// Check uniform buffer sizes & recreate buffers if needed
 	size_t const materialBufferSize = scene.materials.size() * sizeof(UniformMaterialData);
 	size_t const objectBufferSize = scene.nodes.count * sizeof(UniformObjectData);

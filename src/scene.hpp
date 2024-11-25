@@ -44,8 +44,10 @@ public:
 
     void clear();
 
+    bool empty() const;
+
 public:
-    static constexpr uint32_t MaxTextures = 1024; //< Required for descriptor indexing stuff
+    static constexpr uint32_t MaxTextures = 1024; //< Required for descriptor indexing in renderer
 
     SceneRef activeCamera = RefUnused;
 

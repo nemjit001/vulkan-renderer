@@ -7,6 +7,7 @@ struct Buffer;
 struct Texture;
 struct Mesh;
 class RenderDeviceContext;
+class Scene;
 
 /// @brief Read a binary shader file.
 /// @param path Path to the shader file.
@@ -36,3 +37,10 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
 /// @param size 
 /// @return A boolean indicating success.
 bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void* pData, size_t size);
+
+/// @brief Load a scene file from disk.
+/// @param pDeviceContext 
+/// @param path 
+/// @param scene The scene to populate w/ scene data, it will NOT be cleared before loading.
+/// @return 
+bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& scene);

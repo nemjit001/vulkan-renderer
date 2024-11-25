@@ -92,4 +92,14 @@ void Scene::clear()
     meshes.clear();
 
     cameras.clear();
+    activeCamera = RefUnused;
+}
+
+bool Scene::empty() const
+{
+    return cameras.empty()
+        || meshes.empty()
+        || materials.empty()
+        || objects.count == 0
+        || nodes.count == 0;
 }

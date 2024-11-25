@@ -86,62 +86,29 @@ namespace Engine
             return false;
         }
 
-        // Set up scene
+        // Set up default scene camera
+        Camera camera{};
+        camera.type = CameraType::Perspective;
+        camera.perspective.FOVy = 60.0F;
+        camera.perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
+        camera.perspective.zNear = 0.01F;
+        camera.perspective.zFar = 100.0F;
+        SceneRef cameraRef = scene.addCamera(camera);
+        SceneRef cameraNode = scene.createNode("Camera", Transform{ { 0.0F, 0.0F, -5.0F } });
+        scene.nodes.cameraRef[cameraNode] = cameraRef;
+        scene.activeCamera = cameraNode;
+
+        // Load scene file from disk
+        if (!loadScene(pDeviceContext, "data/assets/suzanne.obj", scene))
         {
-            Camera camera{};
-            camera.type = CameraType::Perspective;
-            camera.perspective.FOVy = 60.0F;
-            camera.perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
-            camera.perspective.zNear = 0.01F;
-            camera.perspective.zFar = 100.0F;
-            SceneRef cameraRef = scene.addCamera(camera);
-            SceneRef cameraNode = scene.createNode("Camera", Transform{ { 0.0F, 0.0F, -5.0F } });
-            scene.nodes.cameraRef[cameraNode] = cameraRef;
-            scene.activeCamera = cameraNode;
+            printf("VK Renderer scene load failed\n");
+            return false;
+        }
 
-            Mesh cubeMesh{};
-            if (!loadOBJ(pDeviceContext, "data/assets/cube.obj", cubeMesh)) {
-                return false;
-            }
-
-            Mesh suzanneMesh{};
-            if (!loadOBJ(pDeviceContext, "data/assets/suzanne.obj", suzanneMesh)) {
-                return false;
-            }
-
-            SceneRef cubeMeshRef = scene.addMesh(cubeMesh);
-            SceneRef suzanneMeshRef = scene.addMesh(suzanneMesh);
-
-            Texture brickAlbedoTexture{};
-            if (!loadTexture(pDeviceContext, "data/assets/brickwall.jpg", brickAlbedoTexture)
-                || !brickAlbedoTexture.initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT)) {
-                return false;
-            }
-
-            Texture brickNormalTexture{};
-            if (!loadTexture(pDeviceContext, "data/assets/brickwall_normal.jpg", brickNormalTexture)
-                || !brickNormalTexture.initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT)) {
-                return false;
-            }
-
-            SceneRef brickAlbedoRef = scene.addTexture(brickAlbedoTexture);
-            SceneRef brickNormalRef = scene.addTexture(brickNormalTexture);
-
-            Material defaultMaterial{};
-            defaultMaterial.defaultAlbedo = glm::vec3(1.0F, 0.1F, 0.6F);
-            defaultMaterial.defaultSpecular = glm::vec3(0.5F);
-            defaultMaterial.albedoTexture = brickAlbedoRef;
-            defaultMaterial.normalTexture = brickNormalRef;
-            SceneRef brickMaterialRef = scene.addMaterial(defaultMaterial);
-
-            SceneRef cubeObjectRef = scene.addObject(cubeMeshRef, brickMaterialRef);
-            SceneRef suzanneObjectRef = scene.addObject(suzanneMeshRef, brickMaterialRef);
-            SceneRef cubeNode = scene.createNode("Cube", Transform{ { -2.0F, 0.0F, 0.0F } });
-            SceneRef suzanneNode = scene.createNode("Suzanne", Transform{ { 2.0F, 0.0F, 0.0F } });
-
-            // FIXME(nemjit001): fix this with a "normal" scene API (this is kinda gross).
-            scene.nodes.objectRef[cubeNode] = cubeObjectRef;
-            scene.nodes.objectRef[suzanneNode] = suzanneObjectRef;
+        if (scene.empty())
+        {
+            printf("VK Renderer empty scene rendering is NYI\n");
+            return false;
         }
 
         printf("Initialized Vulkan Renderer\n");

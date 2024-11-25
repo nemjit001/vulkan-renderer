@@ -1,16 +1,21 @@
 #define _CRT_SECURE_NO_WARNINGS //< Used to silence C file IO function warnings
 
 #include "assets.hpp"
-#include "mesh.hpp"
-#include "render_backend.hpp"
 
 #include <cstdio>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define TINYOBJLOADER_IMPLEMENTATION
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
 #include <stb_image.h>
 #include <tiny_obj_loader.h>
 #include <volk.h>
+
+#include "mesh.hpp"
+#include "render_backend.hpp"
+#include "scene.hpp"
 
 bool readShaderFile(char const* path, std::vector<uint32_t>& shaderCode)
 {
@@ -353,5 +358,30 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
     }
 
     uploadBuffer.destroy();
+    return true;
+}
+
+bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& scene)
+{
+    uint32_t const importflags = aiProcess_CalcTangentSpace | aiProcess_GenSmoothNormals | aiProcess_GenUVCoords;
+
+    Assimp::Importer importer;
+    aiScene const* pImportedScene = importer.ReadFile(path, importflags);
+    if (pImportedScene == nullptr)
+    {
+        printf("Scene import failed: %s\n", importer.GetErrorString());
+        return false;
+    }
+
+    printf("Scene [%s]:\n", pImportedScene->GetShortFilename(path));
+    printf("- Animations: %u\n", pImportedScene->mNumAnimations);
+    printf("- Cameras:    %u\n", pImportedScene->mNumCameras);
+    printf("- Lights:     %u\n", pImportedScene->mNumLights);
+    printf("- Materials:  %u\n", pImportedScene->mNumMaterials);
+    printf("- Meshes:     %u\n", pImportedScene->mNumMeshes);
+    printf("- Skeletons:  %u\n", pImportedScene->mNumSkeletons);
+    printf("- Textures:   %u\n", pImportedScene->mNumTextures);
+
+    // TODO(nemjit001): walk node graph, add node to scene w/ related data (meshes, cameras, materials, etc.)
     return true;
 }

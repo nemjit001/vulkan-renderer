@@ -116,5 +116,5 @@ protected:
 	std::vector<VkDescriptorSet> m_objectSets{};
 
 	//-- Optimized draw data --//
-	std::unordered_map<uint32_t, std::vector<uint32_t>> m_drawData; //< Material:Object[] mapping
+	std::unordered_map<uint32_t, std::vector<uint32_t>> m_drawData; //< Material:Node[] mapping
 };
