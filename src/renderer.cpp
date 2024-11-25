@@ -561,10 +561,6 @@ bool ForwardRenderer::onResize(uint32_t width, uint32_t height)
 
 void ForwardRenderer::update(Scene const& scene)
 {
-	// Check if scene has renderable data
-	// FIXME(nemjit001): Gracefully handle empty scenes pls
-	assert(!scene.empty());
-
 	// Check uniform buffer sizes & recreate buffers if needed
 	size_t const materialBufferSize = scene.materials.size() * sizeof(UniformMaterialData);
 	size_t const objectBufferSize = scene.nodes.count * sizeof(UniformObjectData);
@@ -590,50 +586,66 @@ void ForwardRenderer::update(Scene const& scene)
 	}
 
 	// Upload uniform camera data
-	Transform const& transform = scene.nodes.transform[scene.activeCamera];
-	glm::mat4 const& camTransform = transform.matrix();
-	glm::vec3 const camForward = glm::vec3(camTransform * glm::vec4(FORWARD, 0.0));
-	glm::vec3 const camUp = glm::vec3(camTransform * glm::vec4(UP, 0.0));
-	glm::mat4 const view = glm::lookAt(transform.position, transform.position + camForward, camUp);
+	Transform const& camTransform = scene.nodes.transform[scene.activeCamera];
+	glm::mat4 const& camTransformMat = camTransform.matrix();
+	glm::vec3 const camForward = glm::vec3(camTransformMat * glm::vec4(FORWARD, 0.0));
+	glm::vec3 const camUp = glm::vec3(camTransformMat * glm::vec4(UP, 0.0));
+	glm::mat4 const camView = glm::lookAt(camTransform.position, camTransform.position + camForward, camUp);
 
-	UniformCameraData cameraData{};
-	cameraData.position = scene.nodes.transform[scene.activeCamera].position;
-	cameraData.matrix = scene.cameras[scene.nodes.cameraRef[scene.activeCamera]].matrix() * view;
+	UniformCameraData const cameraData{
+		camTransform.position,
+		scene.cameras[scene.nodes.cameraRef[scene.activeCamera]].matrix()* camView,
+	};
 
 	m_sceneDataBuffer.map();
 	memcpy(m_sceneDataBuffer.pData, &cameraData, sizeof(UniformCameraData));
 	m_sceneDataBuffer.unmap();
 
-	// Upload uniform material data
-	std::vector<UniformMaterialData> materialData{};
-	materialData.reserve(scene.materials.size());
-	for (size_t i = 0; i < scene.materials.size(); i++)
+	// Upload uniform material data if it exists
+	if (scene.materials.size() > 0)
 	{
-		Material const& mat = scene.materials[i];
-		materialData.emplace_back(UniformMaterialData{
-			mat.defaultAlbedo,
-			mat.defaultSpecular,
-			mat.albedoTexture,
-			mat.specularTexture,
-			mat.normalTexture
-		});
-	}
-	m_materialDataBuffer.map();
-	memcpy(m_materialDataBuffer.pData, materialData.data(), m_materialDataBuffer.size);
-	m_materialDataBuffer.unmap();
+		std::vector<UniformMaterialData> materialData{};
+		materialData.reserve(scene.materials.size());
+		for (size_t i = 0; i < scene.materials.size(); i++)
+		{
+			Material const& mat = scene.materials[i];
+			UniformMaterialData const uniformData{
+				mat.defaultAlbedo,
+				mat.defaultSpecular,
+				mat.albedoTexture,
+				mat.specularTexture,
+				mat.normalTexture
+			};
 
-	// Upload uniform object data
-	std::vector<UniformObjectData> objectData{};
-	objectData.reserve(scene.nodes.count);
-	for (size_t i = 0; i < scene.nodes.count; i++)
-	{
-		glm::mat4 model = scene.nodes.transform[i].matrix();
-		glm::mat4 normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(model))));
-		objectData.emplace_back(UniformObjectData{ model, normal });
+			materialData.emplace_back(uniformData);
+		}
+
+		m_materialDataBuffer.map();
+		memcpy(m_materialDataBuffer.pData, materialData.data(), m_materialDataBuffer.size);
+		m_materialDataBuffer.unmap();
 	}
-	m_objectDataBuffer.map();
-	memcpy(m_objectDataBuffer.pData, objectData.data(), m_objectDataBuffer.size);
-	m_objectDataBuffer.unmap();
+
+	// Upload uniform object data if it exists
+	if (scene.objects.count > 0)
+	{
+		std::vector<UniformObjectData> objectData{};
+		objectData.reserve(scene.nodes.count);
+		for (size_t i = 0; i < scene.nodes.count; i++)
+		{
+			glm::mat4 const model = scene.nodes.transform[i].matrix();
+			glm::mat4 const normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(model))));
+			UniformObjectData const uniformData{
+				model,
+				normal
+			};
+
+			objectData.emplace_back(uniformData);
+		}
+
+		m_objectDataBuffer.map();
+		memcpy(m_objectDataBuffer.pData, objectData.data(), m_objectDataBuffer.size);
+		m_objectDataBuffer.unmap();
+	}
 
 	// Size descriptor set arrays for this frame & recreate descriptor pool
 	m_materialSets.resize(scene.materials.size());
@@ -672,20 +684,32 @@ void ForwardRenderer::update(Scene const& scene)
 	sceneSetAllocInfo.descriptorSetCount = 1;
 	sceneSetAllocInfo.pSetLayouts = &m_sceneDataSetLayout;
 
-	VkDescriptorSetAllocateInfo materialSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-	materialSetAllocInfo.descriptorPool = m_descriptorPool;
-	materialSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_materialSets.size());
-	materialSetAllocInfo.pSetLayouts = materialSetLayouts.data();
+	if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &sceneSetAllocInfo, &m_sceneSet))) {
+		throw std::runtime_error("Forward Renderer update scene data set alloc failed\n");
+	}
 
-	VkDescriptorSetAllocateInfo objectSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-	objectSetAllocInfo.descriptorPool = m_descriptorPool;
-	objectSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_objectSets.size());
-	objectSetAllocInfo.pSetLayouts = objectSetLayouts.data();
+	if (m_materialSets.size() > 0)
+	{
+		VkDescriptorSetAllocateInfo materialSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		materialSetAllocInfo.descriptorPool = m_descriptorPool;
+		materialSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_materialSets.size());
+		materialSetAllocInfo.pSetLayouts = materialSetLayouts.data();
 
-	if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &sceneSetAllocInfo, &m_sceneSet))
-		|| VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &materialSetAllocInfo, m_materialSets.data()))
-		|| VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &objectSetAllocInfo, m_objectSets.data()))) {
-		throw std::runtime_error("Forward Renderer update descriptor set alloc failed");
+		if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &materialSetAllocInfo, m_materialSets.data()))) {
+			throw std::runtime_error("Forward Renderer update material descriptor set alloc failed");
+		}
+	}
+
+	if (m_objectSets.size() > 0)
+	{
+		VkDescriptorSetAllocateInfo objectSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		objectSetAllocInfo.descriptorPool = m_descriptorPool;
+		objectSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_objectSets.size());
+		objectSetAllocInfo.pSetLayouts = objectSetLayouts.data();
+
+		if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &objectSetAllocInfo, m_objectSets.data()))) {
+			throw std::runtime_error("Forward Renderer update object descriptor set alloc failed");
+		}
 	}
 
 	// Update all descriptor sets in frame (scene data, texture array, material data, object data)
@@ -795,7 +819,7 @@ void ForwardRenderer::render(Scene const& scene)
 
 	// Render forward pass
 	{
-		uint32_t backbufferIndex = m_pDeviceContext->getCurrentBackbufferIndex();
+		uint32_t const backbufferIndex = m_pDeviceContext->getCurrentBackbufferIndex();
 
 		VkClearValue clearValues[] = {
 			VkClearValue{{ 0.1F, 0.1F, 0.1F, 1.0F }},

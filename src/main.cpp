@@ -105,12 +105,6 @@ namespace Engine
             return false;
         }
 
-        if (scene.empty())
-        {
-            printf("VK Renderer empty scene rendering is NYI\n");
-            return false;
-        }
-
         printf("Initialized Vulkan Renderer\n");
         return true;
     }

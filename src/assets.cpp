@@ -361,6 +361,29 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
     return true;
 }
 
+// Helper function for recursive node tree walking
+// TODO(nemjit001): walk node tree & store data in scene structure
+void sceneTraverseChildren(Scene& scene, aiNode* pNode)
+{
+    assert(pNode != nullptr);
+
+    printf("Node [%s]\n", pNode->mName.C_Str());
+    printf("- Children:  %d\n", pNode->mNumChildren);
+    printf("- Meshes:    %d\n", pNode->mNumMeshes);
+    for (uint32_t i = 0; i < pNode->mNumMeshes; i++) {
+        printf("  - Mesh: %d\n", pNode->mMeshes[i]);
+    }
+
+    // TODO(nemjit001):
+    // - Decompose transform into TRS
+    // - Add node w/ meshref to scene hierarchy
+    // - If node is a camera, add node with camera ref to hierarchy
+
+    for (uint32_t i = 0; i < pNode->mNumChildren; i++) {
+        sceneTraverseChildren(scene, pNode->mChildren[i]);
+    }
+}
+
 bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& scene)
 {
     uint32_t const importflags = aiProcess_CalcTangentSpace | aiProcess_GenSmoothNormals | aiProcess_GenUVCoords;
@@ -374,13 +397,14 @@ bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& sce
     }
 
     printf("Scene [%s]:\n", pImportedScene->GetShortFilename(path));
-    printf("- Animations: %u\n", pImportedScene->mNumAnimations);
+    printf("- Animations: %u\n", pImportedScene->mNumAnimations); //< NYI in scene
     printf("- Cameras:    %u\n", pImportedScene->mNumCameras);
-    printf("- Lights:     %u\n", pImportedScene->mNumLights);
+    printf("- Lights:     %u\n", pImportedScene->mNumLights); //< NYI in scene
     printf("- Materials:  %u\n", pImportedScene->mNumMaterials);
     printf("- Meshes:     %u\n", pImportedScene->mNumMeshes);
-    printf("- Skeletons:  %u\n", pImportedScene->mNumSkeletons);
+    printf("- Skeletons:  %u\n", pImportedScene->mNumSkeletons); //< NYI in scene
     printf("- Textures:   %u\n", pImportedScene->mNumTextures);
+    sceneTraverseChildren(scene, pImportedScene->mRootNode);
 
     // TODO(nemjit001): walk node graph, add node to scene w/ related data (meshes, cameras, materials, etc.)
     return true;
