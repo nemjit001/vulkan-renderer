@@ -15,7 +15,7 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 	- [X] Perspective camera
 	- [X] Orthographic camera
 	- [ ] Camera controller
-- [ ] Scene loading (glTF2.0)
+- [X] Scene loading (Assimp)
 - [ ] Lights
 	- [ ] Sun light (directional)
 	- [ ] Multiple point lights
