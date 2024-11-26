@@ -1,7 +1,9 @@
 #pragma once
 
 #include "math.hpp"
-#include "render_backend.hpp"
+#include "render_backend/buffer.hpp"
+
+class RenderDeviceContext;
 
 /// @brief Vertex struct with interleaved per-vertex data.
 struct Vertex

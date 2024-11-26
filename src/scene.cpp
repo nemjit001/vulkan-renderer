@@ -1,5 +1,9 @@
 #include "scene.hpp"
 
+#include "camera.hpp"
+#include "mesh.hpp"
+#include "render_backend/texture.hpp"
+
 SceneRef Scene::addCamera(Camera const& camera)
 {
     SceneRef ref = static_cast<SceneRef>(cameras.size());

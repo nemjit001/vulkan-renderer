@@ -6,8 +6,8 @@
 #include <SDL.h>
 #include <vulkan/vulkan.h>
 
-#define SIZEOF_ARRAY(val)   (sizeof((val)) / sizeof((val)[0]))
-#define VK_FAILED(expr)     ((expr) != VK_SUCCESS)
+struct Buffer;
+struct Texture;
 
 /// @brief Command queue types available in a render device context.
 enum class CommandQueueType : uint8_t
@@ -23,49 +23,6 @@ struct Backbuffer
 	VkFormat format;
 	VkImage image;
 	VkImageView view;
-};
-
-/// @brief GPU buffer with associated data.
-struct Buffer
-{
-	/// @brief Destroy this buffer.
-	void destroy();
-
-	/// @brief Map buffer memory.
-	void map();
-
-	/// @brief Unmap buffer memory.
-	void unmap();
-
-	VkDevice device;
-	VkBuffer handle;
-	VkDeviceMemory memory;
-	size_t size;
-	bool mapped;
-	void* pData;
-};
-
-/// @brief GPU texture with associated data.
-struct Texture
-{
-	/// @brief Destroy this texture.
-	void destroy();
-
-	/// @brief Initialize the default image view for this texture.
-	/// @param viewType 
-	/// @param aspectMask 
-	/// @return 
-	bool initDefaultView(VkImageViewType viewType, VkImageAspectFlags aspectMask);
-
-	VkDevice device;
-	VkImage handle;
-	VkImageView view;
-	VkDeviceMemory memory;
-	VkFormat format;
-	uint32_t width;
-	uint32_t height;
-	uint32_t depthOrLayers;
-	uint32_t levels;
 };
 
 /// @brief Command context with associated command queue.

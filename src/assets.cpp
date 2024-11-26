@@ -16,7 +16,11 @@
 
 #include "mesh.hpp"
 #include "render_backend.hpp"
+#include "render_backend/buffer.hpp"
+#include "render_backend/texture.hpp"
+#include "render_backend/utils.hpp"
 #include "scene.hpp"
+#include "transform.hpp"
 
 bool readShaderFile(char const* path, std::vector<uint32_t>& shaderCode)
 {

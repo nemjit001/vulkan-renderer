@@ -3,11 +3,12 @@
 #include <string>
 #include <vector>
 
-#include "assets.hpp"
-#include "camera.hpp"
 #include "math.hpp"
-#include "mesh.hpp"
 #include "transform.hpp"
+
+struct Camera;
+struct Mesh;
+struct Texture;
 
 constexpr glm::vec3 FORWARD = glm::vec3(0.0F, 0.0F, 1.0F);
 constexpr glm::vec3 UP      = glm::vec3(0.0F, 1.0F, 0.0F);

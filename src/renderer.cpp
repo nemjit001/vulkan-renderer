@@ -7,7 +7,9 @@
 #include <volk.h>
 
 #include "assets.hpp"
+#include "camera.hpp"
 #include "mesh.hpp"
+#include "render_backend/utils.hpp"
 #include "scene.hpp"
 
 namespace SceneHelpers

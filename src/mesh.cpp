@@ -2,6 +2,9 @@
 
 #include <volk.h>
 
+#include "render_backend.hpp"
+#include "render_backend/utils.hpp"
+
 void Mesh::destroy()
 {
     indexBuffer.destroy();

@@ -6,6 +6,8 @@
 
 #include "math.hpp"
 #include "render_backend.hpp"
+#include "render_backend/buffer.hpp"
+#include "render_backend/texture.hpp"
 
 class Scene;
 
