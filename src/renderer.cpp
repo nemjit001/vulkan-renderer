@@ -626,7 +626,7 @@ void ForwardRenderer::update(Scene const& scene)
 	}
 
 	// Upload uniform object data if it exists
-	if (scene.objects.count > 0)
+	if (scene.nodes.count > 0)
 	{
 		std::vector<UniformObjectData> objectData{};
 		objectData.reserve(scene.nodes.count);
@@ -794,14 +794,8 @@ void ForwardRenderer::update(Scene const& scene)
 	m_drawData.clear();
 	for (uint32_t nodeIdx = 0; nodeIdx < scene.nodes.count; nodeIdx++)
 	{
-		SceneRef const objectRef = scene.nodes.objectRef[nodeIdx];
-		assert(objectRef == RefUnused || objectRef < scene.objects.count);
-		if (objectRef == RefUnused) {
-			continue;
-		}
-
-		SceneRef const meshRef = scene.objects.meshRef[objectRef];
-		SceneRef const materialRef = scene.objects.materialRef[objectRef];
+		SceneRef const meshRef = scene.nodes.meshRef[nodeIdx];
+		SceneRef const materialRef = scene.nodes.materialRef[nodeIdx];
 		if (meshRef == RefUnused || materialRef == RefUnused) {
 			continue;
 		}
@@ -867,10 +861,7 @@ void ForwardRenderer::render(Scene const& scene)
 					0, nullptr
 				);
 
-				SceneRef const objectRef = scene.nodes.objectRef[nodeIdx];
-				assert(objectRef != RefUnused);
-
-				SceneRef const meshRef = scene.objects.meshRef[objectRef];
+				SceneRef const meshRef = scene.nodes.meshRef[nodeIdx];
 				assert(meshRef != RefUnused);
 
 				Mesh const& mesh = scene.meshes[meshRef];

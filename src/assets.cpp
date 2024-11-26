@@ -3,6 +3,7 @@
 #include "assets.hpp"
 
 #include <cstdio>
+#include <vector>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define TINYOBJLOADER_IMPLEMENTATION
@@ -363,30 +364,53 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
 
 // Helper function for recursive node tree walking
 // TODO(nemjit001): walk node tree & store data in scene structure
-void sceneTraverseChildren(Scene& scene, aiNode* pNode)
+void sceneTraverseChildren(
+    Scene& scene, aiScene const* pImportedScene,
+    SceneRef const& parent, aiNode const* pNode,
+    SceneRef const& baseMeshRef,
+    SceneRef const& baseMaterialRef
+)
 {
+    assert(pImportedScene != nullptr);
     assert(pNode != nullptr);
 
-    printf("Node [%s]\n", pNode->mName.C_Str());
-    printf("- Children:  %d\n", pNode->mNumChildren);
-    printf("- Meshes:    %d\n", pNode->mNumMeshes);
-    for (uint32_t i = 0; i < pNode->mNumMeshes; i++) {
-        printf("  - Mesh: %d\n", pNode->mMeshes[i]);
+    // Get assimp transform in usable format
+    aiVector3D nodePosition, nodeScale, nodeRotation;
+    pNode->mTransformation.Decompose(nodeScale, nodeRotation, nodePosition);
+
+    // Get assimp mesh/material data
+    uint32_t nodeMesh = pNode->mNumMeshes > 0 ? pNode->mMeshes[0] : UINT32_MAX;
+    uint32_t nodeMaterial = UINT32_MAX;
+    if (nodeMesh != UINT32_MAX) {
+        nodeMaterial = pImportedScene->mMeshes[nodeMesh]->mMaterialIndex;
     }
 
-    // TODO(nemjit001):
-    // - Decompose transform into TRS
-    // - Add node w/ meshref to scene hierarchy
-    // - If node is a camera, add node with camera ref to hierarchy
+    // Get "our" transform representation
+    glm::vec3 const position(nodePosition.x, nodePosition.y, nodePosition.z);
+    glm::vec3 const euler(nodeRotation.x, nodeRotation.y, nodeRotation.z);
+    glm::vec3 const scale(nodeScale.x, nodeScale.y, nodeScale.z);
+
+    // Fill out node data
+    char const* pNodeName = pNode->mName.C_Str();
+    Transform const transform{ position, glm::quat(euler), scale };
+    SceneRef const meshRef = nodeMesh != UINT32_MAX ? static_cast<SceneRef>(nodeMesh) : RefUnused;
+    SceneRef const materialRef = nodeMaterial != UINT32_MAX ? static_cast<SceneRef>(nodeMaterial) : RefUnused;
+
+    SceneRef const node = (pNode == pImportedScene->mRootNode) ? scene.createRootNode(pNodeName, transform) : scene.createChildNode(parent, pNodeName, transform);
+    scene.nodes.meshRef[node] = meshRef != RefUnused ? baseMeshRef + meshRef : RefUnused;
+    scene.nodes.materialRef[node] = materialRef != RefUnused ? baseMaterialRef + materialRef : RefUnused;
 
     for (uint32_t i = 0; i < pNode->mNumChildren; i++) {
-        sceneTraverseChildren(scene, pNode->mChildren[i]);
+        sceneTraverseChildren(scene, pImportedScene, node, pNode->mChildren[i], baseMeshRef, baseMaterialRef);
     }
 }
 
 bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& scene)
 {
-    uint32_t const importflags = aiProcess_CalcTangentSpace | aiProcess_GenSmoothNormals | aiProcess_GenUVCoords;
+    uint32_t const importflags = aiProcess_Triangulate
+        | aiProcess_GenSmoothNormals
+        | aiProcess_CalcTangentSpace
+        | aiProcess_GenUVCoords;
 
     Assimp::Importer importer;
     aiScene const* pImportedScene = importer.ReadFile(path, importflags);
@@ -396,16 +420,119 @@ bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& sce
         return false;
     }
 
+    SceneRef const baseMeshRef = static_cast<SceneRef>(scene.meshes.size());
+    SceneRef const baseTextureRef = static_cast<SceneRef>(scene.textures.size());
+    SceneRef const baseMaterialRef = static_cast<SceneRef>(scene.materials.size());
+
     printf("Scene [%s]:\n", pImportedScene->GetShortFilename(path));
     printf("- Animations: %u\n", pImportedScene->mNumAnimations); //< NYI in scene
-    printf("- Cameras:    %u\n", pImportedScene->mNumCameras);
+    printf("- Cameras:    %u\n", pImportedScene->mNumCameras); //< TODO
     printf("- Lights:     %u\n", pImportedScene->mNumLights); //< NYI in scene
     printf("- Materials:  %u\n", pImportedScene->mNumMaterials);
     printf("- Meshes:     %u\n", pImportedScene->mNumMeshes);
     printf("- Skeletons:  %u\n", pImportedScene->mNumSkeletons); //< NYI in scene
-    printf("- Textures:   %u\n", pImportedScene->mNumTextures);
-    sceneTraverseChildren(scene, pImportedScene->mRootNode);
+    printf("- Textures:   %u\n", pImportedScene->mNumTextures); //< TODO
 
-    // TODO(nemjit001): walk node graph, add node to scene w/ related data (meshes, cameras, materials, etc.)
+    // TODO(nemjit001): Load all cameras in scene
+
+    // Load all materials in scene
+    for (uint32_t i = 0; i < pImportedScene->mNumMaterials; i++)
+    {
+        aiMaterial const* pImportedMaterial = pImportedScene->mMaterials[i];
+
+        // Load material values
+        aiColor3D albedo;
+        aiColor3D specular;
+        if (pImportedMaterial->Get("$clr.diffuse", aiPTI_Float, 0, albedo) != aiReturn_SUCCESS) {
+            albedo = aiColor3D(1.0F, 0.0F, 0.0F);
+        }
+
+        if (pImportedMaterial->Get("$clr.specular", aiPTI_Float, 0, specular) != aiReturn_SUCCESS) {
+            specular = aiColor3D(0.5F, 0.5F, 0.5F);
+        }
+
+        // Load texture indices (if they exist)
+        uint32_t albedoIdx = UINT32_MAX;
+        uint32_t specularIdx = UINT32_MAX;
+        uint32_t normalIdx = UINT32_MAX;
+        pImportedMaterial->Get("$clr.diffuse", aiPTI_Integer, 0, albedoIdx);
+        pImportedMaterial->Get("$clr.specular", aiPTI_Integer, 0, specularIdx);
+        pImportedMaterial->Get("$mat.height", aiPTI_Integer, 0, normalIdx);
+
+        SceneRef albedoRef = albedoIdx == UINT32_MAX ? RefUnused : albedoIdx;
+        SceneRef specularRef = specularIdx == UINT32_MAX ? RefUnused : specularIdx;
+        SceneRef normalRef = normalIdx == UINT32_MAX ? RefUnused : normalIdx;
+
+        Material material{};
+        material.defaultAlbedo = glm::vec3(albedo.r, albedo.g, albedo.b);
+        material.defaultSpecular = glm::vec3(specular.r, specular.g, specular.b);
+        material.albedoTexture = albedoRef != RefUnused ? baseTextureRef + albedoRef : RefUnused;
+        material.specularTexture = specularRef != RefUnused ? baseTextureRef + specularRef : RefUnused;
+        material.normalTexture = normalRef != RefUnused ? baseTextureRef + normalRef : RefUnused;
+
+        scene.addMaterial(material);
+    }
+
+    // Load all meshes in scene
+    for (uint32_t i = 0; i < pImportedScene->mNumMeshes; i++)
+    {
+        aiMesh const* pImportedMesh = pImportedScene->mMeshes[i];
+        assert(pImportedMesh->mVertices != nullptr);
+        assert(pImportedMesh->mNormals != nullptr);
+        assert(pImportedMesh->mTangents != nullptr);
+        assert(pImportedMesh->mTextureCoords[0] != nullptr);
+
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+        vertices.reserve(pImportedMesh->mNumVertices);
+        indices.reserve(pImportedMesh->mNumFaces * 3);
+
+        // Load vertex data
+        for (uint32_t vertIdx = 0; vertIdx < pImportedMesh->mNumVertices; vertIdx++)
+        {
+            aiVector3D const& position = pImportedMesh->mVertices[vertIdx];
+            aiColor4D const& color = pImportedMesh->mColors[0] != nullptr ? pImportedMesh->mColors[0][vertIdx] : aiColor4D(1.0F, 1.0F, 1.0F, 1.0F);
+            aiVector3D const& normal = pImportedMesh->mNormals[vertIdx];
+            aiVector3D const& tangent = pImportedMesh->mTangents[vertIdx];
+            aiVector3D const& texcoord = pImportedMesh->mTextureCoords[0][vertIdx];
+
+            Vertex const vertex{
+                { position.x, position.y, position.z },
+                { color.r, color.g, color.b, },
+                { normal.x, normal.y, normal.z },
+                { tangent.x, tangent.y, tangent.z },
+                { texcoord.x, texcoord.y },
+            };
+
+            vertices.push_back(vertex);
+        }
+
+        // Load index data
+        for (uint32_t faceIdx = 0; faceIdx < pImportedMesh->mNumFaces; faceIdx++)
+        {
+            aiFace const& face = pImportedMesh->mFaces[faceIdx];
+            for (uint32_t idx = 0; idx < face.mNumIndices; idx++) {
+                indices.push_back(face.mIndices[idx]);
+            }
+        }
+
+        Mesh mesh{};
+        if (!createMesh(pDeviceContext, mesh, vertices.data(), static_cast<uint32_t>(vertices.size()), indices.data(), static_cast<uint32_t>(indices.size()))) {
+            return false;
+        }
+
+        scene.addMesh(mesh);
+    }
+
+    // TODO(nemjit001): Load all textures in scene
+
+    sceneTraverseChildren(
+        scene,
+        pImportedScene,
+        RefUnused,
+        pImportedScene->mRootNode,
+        baseMeshRef,
+        baseMaterialRef
+    );
     return true;
 }

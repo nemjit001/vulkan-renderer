@@ -33,37 +33,20 @@ SceneRef Scene::addMaterial(Material const& material)
     return ref;
 }
 
-SceneRef Scene::addObject(SceneRef mesh, SceneRef material)
+SceneRef Scene::createRootNode(std::string const& name, Transform const& transform)
 {
-    SceneRef ref = static_cast<SceneRef>(objects.count);
-    objects.meshRef.push_back(mesh);
-    objects.materialRef.push_back(material);
-    objects.count++;
-
-    assert(
-        objects.count == objects.meshRef.size()
-        && objects.count == objects.materialRef.size()
-    );
-
+    SceneRef ref = createNode(name, transform);
+    rootNodes.emplace_back(ref);
     return ref;
 }
 
-SceneRef Scene::createNode(std::string const& name, Transform const& transform)
+SceneRef Scene::createChildNode(SceneRef const& parent, std::string const& name, Transform const& transform)
 {
-    SceneRef ref = static_cast<SceneRef>(nodes.count);
-    nodes.name.push_back(name);
-    nodes.transform.push_back(transform);
-    nodes.cameraRef.push_back(RefUnused);
-    nodes.objectRef.push_back(RefUnused);
-    nodes.count++;
+    assert(parent < nodes.count);
+    assert(parent != RefUnused);
 
-    assert(
-        nodes.count == nodes.name.size()
-        && nodes.count == nodes.transform.size()
-        && nodes.count == nodes.cameraRef.size()
-        && nodes.count == nodes.objectRef.size()
-    );
-
+    SceneRef ref = createNode(name, transform);
+    nodes.children[parent].emplace_back(ref);
     return ref;
 }
 
@@ -73,22 +56,17 @@ void Scene::clear()
     nodes.name.clear();
     nodes.transform.clear();
     nodes.cameraRef.clear();
-    nodes.objectRef.clear();
-
-    objects.count = 0;
-    objects.meshRef.clear();
-    objects.materialRef.clear();
-
-    materials.clear();
 
     for (auto& texture : textures) {
         texture.destroy();
     }
-    textures.clear();
 
     for (auto& mesh : meshes) {
         mesh.destroy();
     }
+
+    materials.clear();
+    textures.clear();
     meshes.clear();
 
     cameras.clear();
@@ -100,6 +78,28 @@ bool Scene::empty() const
     return cameras.empty()
         || meshes.empty()
         || materials.empty()
-        || objects.count == 0
         || nodes.count == 0;
+}
+
+SceneRef Scene::createNode(std::string const& name, Transform const& transform)
+{
+    SceneRef ref = static_cast<SceneRef>(nodes.count);
+    nodes.name.push_back(name);
+    nodes.transform.push_back(transform);
+    nodes.cameraRef.push_back(RefUnused);
+    nodes.meshRef.push_back(RefUnused);
+    nodes.materialRef.push_back(RefUnused);
+    nodes.children.emplace_back();
+    nodes.count++;
+
+    assert(
+        nodes.count == nodes.name.size()
+        && nodes.count == nodes.transform.size()
+        && nodes.count == nodes.cameraRef.size()
+        && nodes.count == nodes.meshRef.size()
+        && nodes.count == nodes.materialRef.size()
+        && nodes.count == nodes.children.size()
+    );
+
+    return ref;
 }

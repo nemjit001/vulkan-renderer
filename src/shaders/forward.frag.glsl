@@ -59,5 +59,7 @@ void main()
 	}
 
 	vec3 N = normalize(i_TBN * normal);
+//	f_FragColor = vec4(albedo, 1.0);
+//	f_FragColor = vec4(specular, 1.0);
 	f_FragColor = vec4(0.5 + 0.5 * N, 1.0);
 }

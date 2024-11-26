@@ -19,6 +19,40 @@
 #include "scene.hpp"
 #include "timer.hpp"
 
+namespace GUI
+{
+    /// @brief Draw the scene node tree starting from a node ref.
+    /// @param scene 
+    /// @param node Start node.
+    void SceneTree(Scene& scene, SceneRef const& node)
+    {
+        assert(node < scene.nodes.count);
+        std::string label = scene.nodes.name[node] + "##" + std::to_string(node);
+
+        if (ImGui::TreeNode(label.c_str()))
+        {
+            Transform const& transform = scene.nodes.transform[node];
+
+            ImGui::SeparatorText("Transform");
+            ImGui::Text("Position: %8.2f %8.2f %8.2f", transform.position.x, transform.position.y, transform.position.z);
+            ImGui::Text("Rotation: %8.2f %8.2f %8.2f %8.2f", transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w);
+            ImGui::Text("Scale:    %8.2f %8.2f %8.2f", transform.scale.x, transform.scale.y, transform.scale.z);
+
+            ImGui::SeparatorText("Scene Refs");
+            ImGui::Text("Camera:   %d", scene.nodes.cameraRef[node]);
+            ImGui::Text("Mesh:     %d", scene.nodes.meshRef[node]);
+            ImGui::Text("Material: %d", scene.nodes.materialRef[node]);
+
+            ImGui::SeparatorText("Children");
+            for (auto const& child : scene.nodes.children[node]) {
+                SceneTree(scene, child);
+            }
+
+            ImGui::TreePop();
+        }
+    }
+} // namespace GUI
+
 namespace Engine
 {
     constexpr char const* pWindowTitle = "Vulkan Renderer";
@@ -94,7 +128,7 @@ namespace Engine
         camera.perspective.zNear = 0.01F;
         camera.perspective.zFar = 100.0F;
         SceneRef cameraRef = scene.addCamera(camera);
-        SceneRef cameraNode = scene.createNode("Camera", Transform{ { 0.0F, 0.0F, -5.0F } });
+        SceneRef cameraNode = scene.createRootNode("Camera", Transform{ { 0.0F, 0.0F, -5.0F } });
         scene.nodes.cameraRef[cameraNode] = cameraRef;
         scene.activeCamera = cameraNode;
 
@@ -223,6 +257,11 @@ namespace Engine
             ImGui::Text("Frame time:        %10.2f ms", avgFrameTime.getAverage());
             ImGui::Text("- CPU update time: %10.2f ms", avgCPUUpdateTime.getAverage());
             ImGui::Text("- CPU render time: %10.2f ms", avgCPURenderTime.getAverage());
+
+            ImGui::SeparatorText("Scene Tree");
+            for (auto const& root : scene.rootNodes) {
+                GUI::SceneTree(scene, root);
+            }
         }
         ImGui::End();
 
@@ -231,6 +270,8 @@ namespace Engine
         // Update active camera aspect ratio
         SceneRef const activeCamera = scene.nodes.cameraRef[scene.activeCamera];
         scene.cameras[activeCamera].perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
+
+        // Update scene & renderer
         pRenderer->update(scene);
         cpuUpdateTimer.tick();
 

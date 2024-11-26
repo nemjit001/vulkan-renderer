@@ -38,18 +38,22 @@ public:
 
     SceneRef addMaterial(Material const& material);
 
-    SceneRef addObject(SceneRef mesh, SceneRef material);
+    SceneRef createRootNode(std::string const& name = "Node", Transform const& transform = Transform{});
 
-    SceneRef createNode(std::string const& name = "Node", Transform const& transform = Transform{});
+    SceneRef createChildNode(SceneRef const& parent, std::string const& name = "Node", Transform const& transform = Transform{});
 
     void clear();
 
     bool empty() const;
 
+private:
+    SceneRef createNode(std::string const& name, Transform const& transform);
+
 public:
     static constexpr uint32_t MaxTextures = 1024; //< Required for descriptor indexing in renderer
 
     SceneRef activeCamera = RefUnused;
+    std::vector<SceneRef> rootNodes{};
 
     std::vector<Camera> cameras{};
     std::vector<Mesh> meshes{};
@@ -59,16 +63,11 @@ public:
     struct
     {
         uint32_t count = 0;
-        std::vector<SceneRef> meshRef{};
-        std::vector<SceneRef> materialRef{};
-    } objects;
-
-    struct
-    {
-        uint32_t count = 0;
         std::vector<std::string> name{};
         std::vector<Transform> transform{};
         std::vector<SceneRef> cameraRef{};
-        std::vector<SceneRef> objectRef{};
+        std::vector<SceneRef> meshRef{};
+        std::vector<SceneRef> materialRef{};
+        std::vector<std::vector<SceneRef>> children{};
     } nodes;
 };
