@@ -365,8 +365,10 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
 // Helper function for recursive node tree walking
 // TODO(nemjit001): walk node tree & store data in scene structure
 void sceneTraverseChildren(
-    Scene& scene, aiScene const* pImportedScene,
-    SceneRef const& parent, aiNode const* pNode,
+    Scene& scene,
+    aiScene const* pImportedScene,
+    SceneRef const& parent,
+    aiNode const* pNode,
     SceneRef const& baseMeshRef,
     SceneRef const& baseMaterialRef
 )
@@ -451,17 +453,10 @@ bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& sce
             specular = aiColor3D(0.5F, 0.5F, 0.5F);
         }
 
-        // Load texture indices (if they exist)
-        uint32_t albedoIdx = UINT32_MAX;
-        uint32_t specularIdx = UINT32_MAX;
-        uint32_t normalIdx = UINT32_MAX;
-        pImportedMaterial->Get("$clr.diffuse", aiPTI_Integer, 0, albedoIdx);
-        pImportedMaterial->Get("$clr.specular", aiPTI_Integer, 0, specularIdx);
-        pImportedMaterial->Get("$mat.height", aiPTI_Integer, 0, normalIdx);
-
-        SceneRef albedoRef = albedoIdx == UINT32_MAX ? RefUnused : albedoIdx;
-        SceneRef specularRef = specularIdx == UINT32_MAX ? RefUnused : specularIdx;
-        SceneRef normalRef = normalIdx == UINT32_MAX ? RefUnused : normalIdx;
+        // TODO(nemjit001): Load texture indices (if they exist)
+        SceneRef albedoRef = RefUnused;
+        SceneRef specularRef = RefUnused;
+        SceneRef normalRef = RefUnused;
 
         Material material{};
         material.defaultAlbedo = glm::vec3(albedo.r, albedo.g, albedo.b);

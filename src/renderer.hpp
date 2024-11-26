@@ -58,7 +58,7 @@ protected:
 
 	/// @brief Uniform material parameters, aligned for use on the GPU.
 	/// Expects textures to be bound in sampler arrays.
-	struct UniformMaterialData
+	struct alignas(64) UniformMaterialData
 	{
 		alignas(16) glm::vec3 albedo;
 		alignas(16) glm::vec3 specular;
@@ -68,7 +68,7 @@ protected:
 	};
 
 	/// @brief Uniform object data, aligned for use on the GPU.
-	struct UniformObjectData
+	struct alignas(64) UniformObjectData
 	{
 		alignas(16) glm::mat4 model;
 		alignas(16) glm::mat4 normal;
@@ -103,7 +103,7 @@ protected:
 	//-- Uniform buffers --//
 	Buffer m_sceneDataBuffer{}; //< contains camera data.
 	Buffer m_materialDataBuffer{}; //< contains all materials in the scene.
-	Buffer m_objectDataBuffer{}; //< contains a node's transforms (model + normal matrix).
+	Buffer m_objectDataBuffer{}; //< contains a node's world transforms (model + normal matrix).
 
 	//-- GUI state management --//
 	VkDescriptorPool m_guiDescriptorPool = VK_NULL_HANDLE;

@@ -19,3 +19,6 @@
 [submodule "vendored/assimp"]
 	path = vendored/assimp
 	url = https://github.com/assimp/assimp
+[submodule "assets/Sponza"]
+	path = data/assets/Sponza
+	url = https://github.com/jimmiebergmann/Sponza

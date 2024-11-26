@@ -31,8 +31,7 @@ namespace GUI
 
         if (ImGui::TreeNode(label.c_str()))
         {
-            Transform const& transform = scene.nodes.transform[node];
-
+            Transform& transform = scene.nodes.transform[node];
             ImGui::SeparatorText("Transform");
             ImGui::Text("Position: %8.2f %8.2f %8.2f", transform.position.x, transform.position.y, transform.position.z);
             ImGui::Text("Rotation: %8.2f %8.2f %8.2f %8.2f", transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w);
@@ -126,14 +125,14 @@ namespace Engine
         camera.perspective.FOVy = 60.0F;
         camera.perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
         camera.perspective.zNear = 0.01F;
-        camera.perspective.zFar = 100.0F;
+        camera.perspective.zFar = 1000.0F;
         SceneRef cameraRef = scene.addCamera(camera);
-        SceneRef cameraNode = scene.createRootNode("Camera", Transform{ { 0.0F, 0.0F, -5.0F } });
+        SceneRef cameraNode = scene.createRootNode("Camera", Transform{ { 0.0F, 50.0F, -5.0F } });
         scene.nodes.cameraRef[cameraNode] = cameraRef;
         scene.activeCamera = cameraNode;
 
-        // Load scene file from disk
-        if (!loadScene(pDeviceContext, "data/assets/suzanne.obj", scene))
+        // Load scene files from disk
+        if (!loadScene(pDeviceContext, "data/assets/Sponza/sponza.obj", scene))
         {
             printf("VK Renderer scene load failed\n");
             return false;

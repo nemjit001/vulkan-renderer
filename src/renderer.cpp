@@ -10,6 +10,20 @@
 #include "mesh.hpp"
 #include "scene.hpp"
 
+namespace SceneHelpers
+{
+	void calcWorldSpaceTransforms(Scene const& scene, glm::mat4 const& parentTransform, std::vector<glm::mat4>& transforms, SceneRef node)
+	{
+		assert(node < scene.nodes.count);
+		assert(node < transforms.size());
+
+		transforms[node] = parentTransform * scene.nodes.transform[node].matrix();
+		for (auto const& childRef : scene.nodes.children[node]) {
+			calcWorldSpaceTransforms(scene, transforms[node], transforms, childRef);
+		}
+	};
+}
+
 IRenderer::IRenderer(RenderDeviceContext* pDeviceContext)
 	:
 	m_pDeviceContext(pDeviceContext)
@@ -628,11 +642,16 @@ void ForwardRenderer::update(Scene const& scene)
 	// Upload uniform object data if it exists
 	if (scene.nodes.count > 0)
 	{
+		std::vector<glm::mat4> worldTransforms;
+		worldTransforms.resize(scene.nodes.count, glm::identity<glm::mat4>());
+		for (auto const& root : scene.rootNodes) {
+			SceneHelpers::calcWorldSpaceTransforms(scene, glm::identity<glm::mat4>(), worldTransforms, root);
+		}
+
 		std::vector<UniformObjectData> objectData{};
 		objectData.reserve(scene.nodes.count);
-		for (size_t i = 0; i < scene.nodes.count; i++)
+		for (auto const& model : worldTransforms)
 		{
-			glm::mat4 const model = scene.nodes.transform[i].matrix();
 			glm::mat4 const normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(model))));
 			UniformObjectData const uniformData{
 				model,
