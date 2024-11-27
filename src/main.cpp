@@ -224,6 +224,7 @@ namespace Engine
         if (ImGui::Begin("Vulkan Renderer Config"))
         {
             ImGui::SeparatorText("Statistics");
+            ImGui::Text("Framebuffer resolution: %u x %u", framebufferWidth, framebufferHeight);
             ImGui::Text("Frame time:        %10.2f ms", avgFrameTime.getAverage());
             ImGui::Text("- CPU update time: %10.2f ms", avgCPUUpdateTime.getAverage());
             ImGui::Text("- CPU render time: %10.2f ms", avgCPURenderTime.getAverage());
