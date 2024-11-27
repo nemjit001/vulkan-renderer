@@ -120,15 +120,52 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
         printf("STBI image load failed [%s]\n", path);
         return false;
     }
-    printf("Loaded texture [%s] (%d x %d x %d)\n", path, width, height, channels);
 
     // Load all images as 4 channel color targets
     VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
     uint32_t mipLevels = static_cast<uint32_t>(std::log2(std::max(width, height))) + 1;
     channels = 4;
 
-    printf("Texture has %d mip levels\n", mipLevels);
+    printf("Loaded texture [%s] (%d x %d x %d, %d mips)\n", path, width, height, channels, mipLevels);
+    if (!pDeviceContext->createTexture(
+        texture,
+        VK_IMAGE_TYPE_2D,
+        imageFormat,
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1,
+        mipLevels
+    )) {
+        stbi_image_free(pImageData);
+        return false;
+    }
 
+    if (!uploadToTexture(pDeviceContext, texture, pImageData, width * height * channels))
+    {
+        stbi_image_free(pImageData);
+        return false;
+    }
+
+    stbi_image_free(pImageData);
+    return true;
+}
+
+bool loadTextureFromMemory(RenderDeviceContext* pDeviceContext, Texture& texture, void* pData, size_t size)
+{
+    int width = 0, height = 0, channels = 0;
+    stbi_uc* pImageData = stbi_load_from_memory(reinterpret_cast<stbi_uc*>(pData), static_cast<int>(size), &width, &height, &channels, 4);
+    if (pImageData == nullptr)
+    {
+        printf("STBI image load from memory failed\n");
+        return false;
+    }
+
+    // Load all images as 4 channel color targets
+    VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    uint32_t mipLevels = static_cast<uint32_t>(std::log2(std::max(width, height))) + 1;
+    channels = 4;
+
+    printf("Loaded texture from memory (%d x %d x %d, %d mips)\n", width, height, channels, mipLevels);
     if (!pDeviceContext->createTexture(
         texture,
         VK_IMAGE_TYPE_2D,
@@ -416,7 +453,8 @@ bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& sce
     uint32_t const importflags = aiProcess_Triangulate
         | aiProcess_GenSmoothNormals
         | aiProcess_CalcTangentSpace
-        | aiProcess_GenUVCoords;
+        | aiProcess_GenUVCoords
+        | aiProcess_EmbedTextures;
 
     Assimp::Importer importer;
     aiScene const* pImportedScene = importer.ReadFile(path, importflags);
@@ -457,10 +495,28 @@ bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& sce
             specular = aiColor3D(0.5F, 0.5F, 0.5F);
         }
 
-        // TODO(nemjit001): Load texture indices (if they exist)
+        // Load texture indices (if they exist)
         SceneRef albedoRef = RefUnused;
         SceneRef specularRef = RefUnused;
         SceneRef normalRef = RefUnused;
+
+        aiString diffuseTextureFile;
+        if (pImportedMaterial->Get(AI_MATKEY_TEXTURE(aiTextureType_DIFFUSE, 0), diffuseTextureFile) == aiReturn_SUCCESS) {
+            auto texAndIdx = pImportedScene->GetEmbeddedTextureAndIndex(diffuseTextureFile.C_Str());
+            albedoRef = static_cast<SceneRef>(texAndIdx.second);
+        }
+
+        aiString specularTextureFile;
+        if (pImportedMaterial->Get(AI_MATKEY_TEXTURE(aiTextureType_SPECULAR, 0), specularTextureFile) == aiReturn_SUCCESS) {
+            auto texAndIdx = pImportedScene->GetEmbeddedTextureAndIndex(specularTextureFile.C_Str());
+            specularRef = static_cast<SceneRef>(texAndIdx.second);
+        }
+
+        aiString normalTextureFile;
+        if (pImportedMaterial->Get(AI_MATKEY_TEXTURE(aiTextureType_DISPLACEMENT, 0), normalTextureFile) == aiReturn_SUCCESS) {
+            auto texAndIdx = pImportedScene->GetEmbeddedTextureAndIndex(normalTextureFile.C_Str());
+            normalRef = static_cast<SceneRef>(texAndIdx.second);
+        }
 
         Material material{};
         material.defaultAlbedo = glm::vec3(albedo.r, albedo.g, albedo.b);
@@ -523,7 +579,21 @@ bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& sce
         scene.addMesh(mesh);
     }
 
-    // TODO(nemjit001): Load all textures in scene
+    //  Load all textures in scene
+    for (uint32_t i = 0; i < pImportedScene->mNumTextures; i++)
+    {
+        aiTexture const* pImportedTexture = pImportedScene->mTextures[i];
+        size_t const dataSize = pImportedTexture->mHeight == 0 ?
+            pImportedTexture->mWidth : pImportedTexture->mWidth * pImportedTexture->mHeight * sizeof(aiTexel);
+        
+        Texture texture{};
+        if (!loadTextureFromMemory(pDeviceContext, texture, reinterpret_cast<void*>(pImportedTexture->pcData), dataSize)
+            || !texture.initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT)) {
+            return false;
+        }
+
+        scene.addTexture(texture);
+    }
 
     sceneTraverseChildren(
         scene,
