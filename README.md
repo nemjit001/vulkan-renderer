@@ -27,6 +27,7 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 	- [ ] Forward opaque pass
 	- [ ] Transparency pass
 - [ ] PBR materials
+- [ ] Alpha tested geometry
 - [ ] Animations
 	- [ ] Linear skinning
 	- [ ] Blend shapes
