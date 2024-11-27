@@ -11,11 +11,12 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 - [X] Texture mapping
 	- [X] automatic mipmap generation
 - [X] ImGui support
-- [ ] Virtual camera support
+- [X] Virtual camera support
 	- [X] Perspective camera
 	- [X] Orthographic camera
-	- [ ] Camera controller
+	- [X] Camera controller
 - [X] Scene loading (Assimp)
+	- [ ] Camera loading
 - [ ] Lights
 	- [ ] Sun light (directional)
 	- [ ] Multiple point lights
