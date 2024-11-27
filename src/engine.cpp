@@ -16,7 +16,9 @@
 
 #include "assets.hpp"
 #include "camera.hpp"
+#include "camera_controller.hpp"
 #include "gui.hpp"
+#include "input.hpp"
 #include "math.hpp"
 #include "mesh.hpp"
 #include "renderer.hpp"
@@ -39,6 +41,9 @@ namespace Engine
     Timer frameTimer{};
     Timer cpuUpdateTimer{};
     Timer cpuRenderTimer{};
+    InputManager inputManager{};
+    CameraController cameraController{ 0.25F };
+
     RenderDeviceContext* pDeviceContext = nullptr;
     IRenderer* pRenderer = nullptr;
     Scene scene{};
@@ -111,6 +116,7 @@ namespace Engine
             return false;
         }
 
+        cameraController.getActiveCamera(&scene);
         printf("Initialized Vulkan Renderer\n");
         return true;
     }
@@ -158,6 +164,7 @@ namespace Engine
 
     void update()
     {
+        // Await frame start
         pRenderer->awaitFrame();
         frameTimer.tick();
 
@@ -171,7 +178,7 @@ namespace Engine
 
         cpuUpdateTimer.reset();
 
-        // Update window state
+        // Update window state & handle input
         SDL_Event event{};
         while (SDL_PollEvent(&event))
         {
@@ -192,11 +199,20 @@ namespace Engine
                     break;
                 }
             } break;
+            case SDL_KEYUP:
+            case SDL_KEYDOWN:
+                inputManager.setKeyState(event.key.keysym.scancode, event.type == SDL_KEYDOWN);
+                break;
             default:
                 break;
             }
         }
 
+        // Get active camera
+        SceneRef const& activeCameraRef = scene.nodes.cameraRef[scene.activeCamera];
+        Camera& activeCamera = scene.cameras[activeCameraRef];
+
+        // Draw GUI
         ImGui_ImplSDL2_NewFrame();
         ImGui_ImplVulkan_NewFrame();
         ImGui::NewFrame();
@@ -210,6 +226,11 @@ namespace Engine
             ImGui::Text("Frame time:        %10.2f ms", avgFrameTime.getAverage());
             ImGui::Text("- CPU update time: %10.2f ms", avgCPUUpdateTime.getAverage());
             ImGui::Text("- CPU render time: %10.2f ms", avgCPURenderTime.getAverage());
+
+            ImGui::SeparatorText("Camera");
+            ImGui::DragFloat("FOV Y", &activeCamera.perspective.FOVy);
+            ImGui::DragFloat("Z Near", &activeCamera.perspective.zNear, 1.0F, 0.0F, 1000.0F);
+            ImGui::DragFloat("Z Far", &activeCamera.perspective.zFar, 1.0F, 0.0F, 10000.0F);
 
             ImGui::SeparatorText("Scene data");
             ImGui::Text("Meshes:    %d", scene.meshes.size());
@@ -227,10 +248,10 @@ namespace Engine
         ImGui::Render();
 
         // Update active camera aspect ratio
-        SceneRef const activeCamera = scene.nodes.cameraRef[scene.activeCamera];
-        scene.cameras[activeCamera].perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
+        activeCamera.perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
 
-        // Update scene & renderer
+        // Update subsystems
+        cameraController.update(inputManager, frameTimer.deltaTimeMS());
         pRenderer->update(scene);
         cpuUpdateTimer.tick();
 

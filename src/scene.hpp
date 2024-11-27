@@ -10,10 +10,6 @@ struct Camera;
 struct Mesh;
 struct Texture;
 
-constexpr glm::vec3 FORWARD = glm::vec3(0.0F, 0.0F, 1.0F);
-constexpr glm::vec3 UP      = glm::vec3(0.0F, 1.0F, 0.0F);
-constexpr glm::vec3 RIGHT   = glm::vec3(1.0F, 0.0F, 0.0F);
-
 using SceneRef = uint32_t;
 constexpr SceneRef RefUnused = ~0U;
 
@@ -53,7 +49,7 @@ private:
 public:
     static constexpr uint32_t MaxTextures = 1024; //< Required for descriptor indexing in renderer
 
-    SceneRef activeCamera = RefUnused;
+    SceneRef activeCamera = RefUnused; //< Reference to a scene node containing a camera reference
     std::vector<SceneRef> rootNodes{};
 
     std::vector<Camera> cameras{};
