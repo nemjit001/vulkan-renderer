@@ -52,5 +52,7 @@ void CameraController::update(InputManager const& inputManager, double deltaTime
 		deltaPosition -= camUp * m_moveSpeed * static_cast<float>(deltaTimeMS);
 	}
 
+	// TODO(nemjit001): Handle rotation based on mouse movement
+
 	cameraTransform.position += deltaPosition;
 }

@@ -14,7 +14,7 @@ namespace GUI
             Transform& transform = scene.nodes.transform[node];
             ImGui::SeparatorText("Transform");
             ImGui::DragFloat3("Position", &transform.position[0], 0.1F);
-            ImGui::DragFloat4("Rotation", &transform.rotation[0], 0.1F);
+            ImGui::DragFloat4("Rotation", &transform.rotation[0], 0.1F); // FIXME(nemjit001): some good quat rotation pls
             ImGui::DragFloat3("Scale", &transform.scale[0], 0.1F);
 
             //ImGui::Text("Position: %8.2f %8.2f %8.2f", transform.position.x, transform.position.y, transform.position.z);
