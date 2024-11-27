@@ -106,6 +106,7 @@ protected:
 	Buffer m_sceneDataBuffer{}; //< contains camera data.
 	Buffer m_materialDataBuffer{}; //< contains all materials in the scene.
 	Buffer m_objectDataBuffer{}; //< contains a node's world transforms (model + normal matrix).
+	std::vector<glm::mat4> m_objectTransforms{}; //< contains cached world space transforms
 
 	//-- GUI state management --//
 	VkDescriptorPool m_guiDescriptorPool = VK_NULL_HANDLE;

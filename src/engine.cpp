@@ -203,13 +203,21 @@ namespace Engine
 
         if (ImGui::Begin("Vulkan Renderer Config"))
         {
-            ImGui::SeparatorText("Statistics");
+            ImGui::SeparatorText("Status");
             ImGui::Text("Framebuffer resolution: %u x %u", framebufferWidth, framebufferHeight);
+
+            ImGui::SeparatorText("Statistics");
             ImGui::Text("Frame time:        %10.2f ms", avgFrameTime.getAverage());
             ImGui::Text("- CPU update time: %10.2f ms", avgCPUUpdateTime.getAverage());
             ImGui::Text("- CPU render time: %10.2f ms", avgCPURenderTime.getAverage());
 
-            ImGui::SeparatorText("Scene Tree");
+            ImGui::SeparatorText("Scene data");
+            ImGui::Text("Meshes:    %d", scene.meshes.size());
+            ImGui::Text("Textures:  %d", scene.textures.size());
+            ImGui::Text("Materials: %d", scene.materials.size());
+            ImGui::Text("Nodes:     %d", scene.nodes.count);
+
+            ImGui::SeparatorText("Scene tree");
             for (auto const& root : scene.rootNodes) {
                 GUI::SceneTree(scene, root);
             }

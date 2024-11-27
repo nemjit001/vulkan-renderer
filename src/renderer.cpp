@@ -620,39 +620,37 @@ void ForwardRenderer::update(Scene const& scene)
 	// Upload uniform material data if it exists
 	if (scene.materials.size() > 0)
 	{
-		std::vector<UniformMaterialData> materialData{};
-		materialData.reserve(scene.materials.size());
-		for (size_t i = 0; i < scene.materials.size(); i++)
+		m_materialDataBuffer.map();
+		void* pBufferDest = m_materialDataBuffer.pData;
+		for (auto const& material : scene.materials)
 		{
-			Material const& mat = scene.materials[i];
 			UniformMaterialData const uniformData{
-				mat.defaultAlbedo,
-				mat.defaultSpecular,
-				mat.albedoTexture,
-				mat.specularTexture,
-				mat.normalTexture
+				material.defaultAlbedo,
+				material.defaultSpecular,
+				material.albedoTexture,
+				material.specularTexture,
+				material.normalTexture
 			};
 
-			materialData.emplace_back(uniformData);
+
+			memcpy(pBufferDest, &uniformData, sizeof(UniformMaterialData));
+			pBufferDest = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pBufferDest) + sizeof(UniformMaterialData));
 		}
 
-		m_materialDataBuffer.map();
-		memcpy(m_materialDataBuffer.pData, materialData.data(), m_materialDataBuffer.size);
 		m_materialDataBuffer.unmap();
 	}
 
 	// Upload uniform object data if it exists
 	if (scene.nodes.count > 0)
 	{
-		std::vector<glm::mat4> worldTransforms;
-		worldTransforms.resize(scene.nodes.count, glm::identity<glm::mat4>());
+		m_objectTransforms.resize(scene.nodes.count);
 		for (auto const& root : scene.rootNodes) {
-			SceneHelpers::calcWorldSpaceTransforms(scene, glm::identity<glm::mat4>(), worldTransforms, root);
+			SceneHelpers::calcWorldSpaceTransforms(scene, glm::identity<glm::mat4>(), m_objectTransforms, root);
 		}
 
-		std::vector<UniformObjectData> objectData{};
-		objectData.reserve(scene.nodes.count);
-		for (auto const& model : worldTransforms)
+		m_objectDataBuffer.map();
+		void* pBufferDest = m_objectDataBuffer.pData;
+		for (auto const& model : m_objectTransforms)
 		{
 			glm::mat4 const normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(model))));
 			UniformObjectData const uniformData{
@@ -660,11 +658,10 @@ void ForwardRenderer::update(Scene const& scene)
 				normal
 			};
 
-			objectData.emplace_back(uniformData);
+			memcpy(pBufferDest, &uniformData, sizeof(UniformObjectData));
+			pBufferDest = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pBufferDest) + sizeof(UniformObjectData));
 		}
 
-		m_objectDataBuffer.map();
-		memcpy(m_objectDataBuffer.pData, objectData.data(), m_objectDataBuffer.size);
 		m_objectDataBuffer.unmap();
 	}
 
