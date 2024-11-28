@@ -7,11 +7,6 @@ glm::mat4 Transform::matrix() const
         * glm::scale(glm::identity<glm::mat4>(), scale);
 }
 
-glm::mat4 Transform::view() const
-{
-    return glm::lookAt(position + forward(), position, UP);
-}
-
 glm::vec3 Transform::forward() const
 {
     return glm::normalize(glm::vec3(glm::inverse(matrix())[2]));

@@ -9,10 +9,6 @@ struct Transform
     /// @return 
     glm::mat4 matrix() const;
 
-    /// @brief Calculate the view matrix for this transform.
-    /// @return 
-    glm::mat4 view() const;
-
     glm::vec3 forward() const;
 
     glm::vec3 right() const;

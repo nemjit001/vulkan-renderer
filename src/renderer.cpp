@@ -606,7 +606,7 @@ void ForwardRenderer::update(Scene const& scene)
 	Camera const& camera = scene.cameras[scene.nodes.cameraRef[scene.activeCamera]];
 	UniformCameraData const cameraData{
 		camTransform.position,
-		camera.matrix() * camTransform.view(),
+		camera.matrix() * glm::lookAt(camTransform.position + camTransform.forward(), camTransform.position, UP),
 	};
 
 	m_sceneDataBuffer.map();

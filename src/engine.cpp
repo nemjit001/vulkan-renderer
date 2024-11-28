@@ -43,7 +43,7 @@ namespace Engine
     Timer cpuUpdateTimer{};
     Timer cpuRenderTimer{};
     InputManager inputManager{};
-    CameraController cameraController{ 0.25F, 0.1F };
+    CameraController cameraController{ 0.25F, 1.0F };
 
     RenderDeviceContext* pDeviceContext = nullptr;
     IRenderer* pRenderer = nullptr;
@@ -202,7 +202,7 @@ namespace Engine
                 }
                 break;
             case SDL_MOUSEMOTION:
-                inputManager.setMouseDelta({ (float)event.motion.xrel, (float)event.motion.yrel });
+                inputManager.setMouseDelta({ (float)event.motion.xrel / (float)framebufferWidth, (float)event.motion.yrel / (float)framebufferHeight });
                 break;
             case SDL_KEYUP:
             case SDL_KEYDOWN:
