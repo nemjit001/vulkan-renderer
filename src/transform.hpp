@@ -2,16 +2,16 @@
 
 #include "math.hpp"
 
-constexpr glm::vec3 FORWARD = glm::vec3(0.0F, 0.0F, 1.0F);
-constexpr glm::vec3 UP = glm::vec3(0.0F, 1.0F, 0.0F);
-constexpr glm::vec3 RIGHT = glm::vec3(1.0F, 0.0F, 0.0F);
-
 /// @brief Simple TRS transform.
 struct Transform
 {
     /// @brief Calculate the transformation matrix for this transform.
     /// @return 
     glm::mat4 matrix() const;
+
+    /// @brief Calculate the view matrix for this transform.
+    /// @return 
+    glm::mat4 view() const;
 
     glm::vec3 forward() const;
 

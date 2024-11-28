@@ -216,6 +216,7 @@ namespace Engine
         // Get active camera state
         SceneRef const& activeCameraRef = scene.nodes.cameraRef[scene.activeCamera];
         Transform const& activeCameraTransform = scene.nodes.transform[scene.activeCamera];
+        glm::vec3 const camPosition = activeCameraTransform.position;
         glm::vec3 const camForward = activeCameraTransform.forward();
         glm::vec3 const camRight = activeCameraTransform.right();
         glm::vec3 const camUp = activeCameraTransform.up();
@@ -229,9 +230,15 @@ namespace Engine
 
         if (ImGui::Begin("Vulkan Renderer Config"))
         {
+            ImGui::SeparatorText("Controls");
+            ImGui::Text("Exit renderer            [Escape]");
+            ImGui::Text("Enable Camera Controller [Space]");
+            ImGui::Text(" - Camera movement       [WASD]");
+            ImGui::Text(" - Camera look           [Mouse]");
+
             ImGui::SeparatorText("Status");
-            ImGui::Text("Framebuffer resolution:  %u x %u", framebufferWidth, framebufferHeight);
-            ImGui::Text("Camera Controller:       %d", captureInput);
+            ImGui::Text("Framebuffer resolution:    %u x %u", framebufferWidth, framebufferHeight);
+            ImGui::Text("Camera Controller Enabled: %s", captureInput ? "yes" : "no");
 
             ImGui::SeparatorText("Statistics");
             ImGui::Text("Frame time:        %10.2f ms", avgFrameTime.getAverage());
@@ -239,9 +246,10 @@ namespace Engine
             ImGui::Text("- CPU render time: %10.2f ms", avgCPURenderTime.getAverage());
 
             ImGui::SeparatorText("Camera");
-            ImGui::Text("Forward: %8.2f %8.2f %8.2f", camForward.x, camForward.y, camForward.z);
-            ImGui::Text("Right:   %8.2f %8.2f %8.2f", camRight.x, camRight.y, camRight.z);
-            ImGui::Text("Up:      %8.2f %8.2f %8.2f", camUp.x, camUp.y, camUp.z);
+            ImGui::Text("Position: %8.2f %8.2f %8.2f", camPosition.x, camPosition.y, camPosition.z);
+            ImGui::Text("Forward:  %8.2f %8.2f %8.2f", camForward.x, camForward.y, camForward.z);
+            ImGui::Text("Right:    %8.2f %8.2f %8.2f", camRight.x, camRight.y, camRight.z);
+            ImGui::Text("Up:       %8.2f %8.2f %8.2f", camUp.x, camUp.y, camUp.z);
             ImGui::DragFloat("FOV Y", &activeCamera.perspective.FOVy);
             ImGui::DragFloat("Z Near", &activeCamera.perspective.zNear, 1.0F, 0.0F, 1000.0F);
             ImGui::DragFloat("Z Far", &activeCamera.perspective.zFar, 1.0F, 0.0F, 10000.0F);

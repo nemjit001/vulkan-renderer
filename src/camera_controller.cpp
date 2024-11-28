@@ -25,26 +25,22 @@ void CameraController::update(InputManager const& inputManager, double deltaTime
 		return;
 	}
 
-	SceneRef const& cameraNode = m_pScene->nodes.cameraRef[m_pScene->activeCamera];
-	Transform& cameraTransform = m_pScene->nodes.transform[m_pScene->activeCamera];
-	assert(cameraNode != RefUnused);
-
-	glm::vec3 const camForward = cameraTransform.forward();
-	glm::vec3 const camRight = cameraTransform.right();
-	glm::vec3 const camUp = cameraTransform.up();
+	Transform& transform = m_pScene->nodes.transform[m_pScene->activeCamera];
+	glm::vec3 const forward = transform.forward();
+	glm::vec3 const right = transform.right();
 
 	glm::vec3 deltaPosition(0.0F);
 	if (inputManager.isPressed(SDL_SCANCODE_W)) {
-		deltaPosition += camForward;
+		deltaPosition -= forward;
 	}
 	if (inputManager.isPressed(SDL_SCANCODE_S)) {
-		deltaPosition -= camForward;
+		deltaPosition += forward;
 	}
 	if (inputManager.isPressed(SDL_SCANCODE_A)) {
-		deltaPosition -= camRight;
+		deltaPosition -= right;
 	}
 	if (inputManager.isPressed(SDL_SCANCODE_D)) {
-		deltaPosition += camRight;
+		deltaPosition += right;
 	}
 	if (inputManager.isPressed(SDL_SCANCODE_E)) {
 		deltaPosition += UP;
@@ -53,12 +49,8 @@ void CameraController::update(InputManager const& inputManager, double deltaTime
 		deltaPosition -= UP;
 	}
 
-	glm::vec2 delta = inputManager.mouseDelta() * m_lookSpeed * static_cast<float>(deltaTimeMS);
-	glm::quat rotation = glm::rotate(cameraTransform.rotation, glm::radians(-delta.x), UP);
-	
-
-	// TODO(nemjit001): Handle rotation based on mouse movement
-
-	cameraTransform.position += deltaPosition * m_moveSpeed * static_cast<float>(deltaTimeMS);
-	cameraTransform.rotation = rotation;
+	glm::vec2 rotationDelta = inputManager.mouseDelta() * m_lookSpeed * static_cast<float>(deltaTimeMS);
+	transform.position += deltaPosition * m_moveSpeed * static_cast<float>(deltaTimeMS);
+	transform.rotation = glm::rotate(transform.rotation, glm::radians(rotationDelta.x), UP);
+	transform.rotation = glm::rotate(transform.rotation, glm::radians(rotationDelta.y), transform.right());
 }

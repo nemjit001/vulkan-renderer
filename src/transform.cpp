@@ -7,6 +7,11 @@ glm::mat4 Transform::matrix() const
         * glm::scale(glm::identity<glm::mat4>(), scale);
 }
 
+glm::mat4 Transform::view() const
+{
+    return glm::lookAt(position + forward(), position, UP);
+}
+
 glm::vec3 Transform::forward() const
 {
     return glm::normalize(glm::vec3(glm::inverse(matrix())[2]));
@@ -14,7 +19,7 @@ glm::vec3 Transform::forward() const
 
 glm::vec3 Transform::right() const
 {
-    return glm::normalize(glm::cross(up(), forward()));
+    return glm::normalize(glm::vec3(glm::inverse(matrix())[0]));
 }
 
 glm::vec3 Transform::up() const
