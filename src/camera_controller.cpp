@@ -6,9 +6,10 @@
 #include "input.hpp"
 #include "scene.hpp"
 
-CameraController::CameraController(float moveSpeed)
+CameraController::CameraController(float moveSpeed, float lookSpeed)
 	:
-	m_moveSpeed(moveSpeed)
+	m_moveSpeed(moveSpeed),
+	m_lookSpeed(lookSpeed)
 {
 	//
 }
@@ -34,25 +35,30 @@ void CameraController::update(InputManager const& inputManager, double deltaTime
 
 	glm::vec3 deltaPosition(0.0F);
 	if (inputManager.isPressed(SDL_SCANCODE_W)) {
-		deltaPosition += camForward * m_moveSpeed * static_cast<float>(deltaTimeMS);
+		deltaPosition += camForward;
 	}
 	if (inputManager.isPressed(SDL_SCANCODE_S)) {
-		deltaPosition -= camForward * m_moveSpeed * static_cast<float>(deltaTimeMS);
+		deltaPosition -= camForward;
 	}
 	if (inputManager.isPressed(SDL_SCANCODE_A)) {
-		deltaPosition += camRight * m_moveSpeed * static_cast<float>(deltaTimeMS);
+		deltaPosition -= camRight;
 	}
 	if (inputManager.isPressed(SDL_SCANCODE_D)) {
-		deltaPosition -= camRight * m_moveSpeed * static_cast<float>(deltaTimeMS);
+		deltaPosition += camRight;
 	}
 	if (inputManager.isPressed(SDL_SCANCODE_E)) {
-		deltaPosition += camUp * m_moveSpeed * static_cast<float>(deltaTimeMS);
+		deltaPosition += UP;
 	}
 	if (inputManager.isPressed(SDL_SCANCODE_Q)) {
-		deltaPosition -= camUp * m_moveSpeed * static_cast<float>(deltaTimeMS);
+		deltaPosition -= UP;
 	}
+
+	glm::vec2 delta = inputManager.mouseDelta() * m_lookSpeed * static_cast<float>(deltaTimeMS);
+	glm::quat rotation = glm::rotate(cameraTransform.rotation, glm::radians(-delta.x), UP);
+	
 
 	// TODO(nemjit001): Handle rotation based on mouse movement
 
-	cameraTransform.position += deltaPosition;
+	cameraTransform.position += deltaPosition * m_moveSpeed * static_cast<float>(deltaTimeMS);
+	cameraTransform.rotation = rotation;
 }

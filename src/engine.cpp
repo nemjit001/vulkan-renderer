@@ -37,12 +37,13 @@ namespace Engine
     SDL_Window* pWindow = nullptr;
     uint32_t framebufferWidth = 0;
     uint32_t framebufferHeight = 0;
+    bool captureInput = false;
 
     Timer frameTimer{};
     Timer cpuUpdateTimer{};
     Timer cpuRenderTimer{};
     InputManager inputManager{};
-    CameraController cameraController{ 0.25F };
+    CameraController cameraController{ 0.25F, 0.1F };
 
     RenderDeviceContext* pDeviceContext = nullptr;
     IRenderer* pRenderer = nullptr;
@@ -102,8 +103,8 @@ namespace Engine
         camera.type = CameraType::Perspective;
         camera.perspective.FOVy = 60.0F;
         camera.perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
-        camera.perspective.zNear = 0.01F;
-        camera.perspective.zFar = 1000.0F;
+        camera.perspective.zNear = 1.0F;
+        camera.perspective.zFar = 2500.0F;
         SceneRef cameraRef = scene.addCamera(camera);
         SceneRef cameraNode = scene.createRootNode("Camera", Transform{ { 0.0F, 50.0F, -5.0F } });
         scene.nodes.cameraRef[cameraNode] = cameraRef;
@@ -190,15 +191,19 @@ namespace Engine
                 running = false;
                 break;
             case SDL_WINDOWEVENT: {
-                switch (event.window.event)
-                {
-                case SDL_WINDOWEVENT_RESIZED:
-                    Engine::onResize();
-                    break;
-                default:
-                    break;
+                    switch (event.window.event)
+                    {
+                    case SDL_WINDOWEVENT_RESIZED:
+                        Engine::onResize();
+                        break;
+                    default:
+                        break;
+                    }
                 }
-            } break;
+                break;
+            case SDL_MOUSEMOTION:
+                inputManager.setMouseDelta({ (float)event.motion.xrel, (float)event.motion.yrel });
+                break;
             case SDL_KEYUP:
             case SDL_KEYDOWN:
                 inputManager.setKeyState(event.key.keysym.scancode, event.type == SDL_KEYDOWN);
@@ -208,9 +213,14 @@ namespace Engine
             }
         }
 
-        // Get active camera
+        // Get active camera state
         SceneRef const& activeCameraRef = scene.nodes.cameraRef[scene.activeCamera];
+        Transform const& activeCameraTransform = scene.nodes.transform[scene.activeCamera];
+        glm::vec3 const camForward = activeCameraTransform.forward();
+        glm::vec3 const camRight = activeCameraTransform.right();
+        glm::vec3 const camUp = activeCameraTransform.up();
         Camera& activeCamera = scene.cameras[activeCameraRef];
+        activeCamera.perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
 
         // Draw GUI
         ImGui_ImplSDL2_NewFrame();
@@ -220,7 +230,8 @@ namespace Engine
         if (ImGui::Begin("Vulkan Renderer Config"))
         {
             ImGui::SeparatorText("Status");
-            ImGui::Text("Framebuffer resolution: %u x %u", framebufferWidth, framebufferHeight);
+            ImGui::Text("Framebuffer resolution:  %u x %u", framebufferWidth, framebufferHeight);
+            ImGui::Text("Camera Controller:       %d", captureInput);
 
             ImGui::SeparatorText("Statistics");
             ImGui::Text("Frame time:        %10.2f ms", avgFrameTime.getAverage());
@@ -228,6 +239,9 @@ namespace Engine
             ImGui::Text("- CPU render time: %10.2f ms", avgCPURenderTime.getAverage());
 
             ImGui::SeparatorText("Camera");
+            ImGui::Text("Forward: %8.2f %8.2f %8.2f", camForward.x, camForward.y, camForward.z);
+            ImGui::Text("Right:   %8.2f %8.2f %8.2f", camRight.x, camRight.y, camRight.z);
+            ImGui::Text("Up:      %8.2f %8.2f %8.2f", camUp.x, camUp.y, camUp.z);
             ImGui::DragFloat("FOV Y", &activeCamera.perspective.FOVy);
             ImGui::DragFloat("Z Near", &activeCamera.perspective.zNear, 1.0F, 0.0F, 1000.0F);
             ImGui::DragFloat("Z Far", &activeCamera.perspective.zFar, 1.0F, 0.0F, 10000.0F);
@@ -247,11 +261,22 @@ namespace Engine
 
         ImGui::Render();
 
-        // Update active camera aspect ratio
-        activeCamera.perspective.aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
+        // Handle inputs
+        if (inputManager.isFirstPressed(SDL_SCANCODE_ESCAPE)) {
+            running = false;
+        }
+
+        if (inputManager.isFirstPressed(SDL_SCANCODE_SPACE)) {
+            captureInput = !captureInput;
+            SDL_SetRelativeMouseMode(captureInput ? SDL_TRUE : SDL_FALSE);
+        }
+
+        if (captureInput) {
+            cameraController.update(inputManager, frameTimer.deltaTimeMS());
+        }
 
         // Update subsystems
-        cameraController.update(inputManager, frameTimer.deltaTimeMS());
+        inputManager.update();
         pRenderer->update(scene);
         cpuUpdateTimer.tick();
 

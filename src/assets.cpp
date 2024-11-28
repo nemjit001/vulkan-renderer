@@ -454,6 +454,7 @@ bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& sce
         | aiProcess_GenSmoothNormals
         | aiProcess_CalcTangentSpace
         | aiProcess_GenUVCoords
+        | aiProcess_FlipUVs
         | aiProcess_EmbedTextures;
 
     Assimp::Importer importer;

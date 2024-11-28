@@ -6,7 +6,7 @@ class InputManager;
 class CameraController
 {
 public:
-	CameraController(float moveSpeed);
+	CameraController(float moveSpeed, float lookSpeed);
 
 	void getActiveCamera(Scene* scene);
 
@@ -14,5 +14,6 @@ public:
 
 private:
 	float m_moveSpeed = 1.0F;
+	float m_lookSpeed = 1.0F;
 	Scene* m_pScene = nullptr;
 };

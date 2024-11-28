@@ -9,15 +9,15 @@ glm::mat4 Transform::matrix() const
 
 glm::vec3 Transform::forward() const
 {
-    return glm::vec3(matrix() * glm::vec4(FORWARD, 0.0));
+    return glm::normalize(glm::vec3(glm::inverse(matrix())[2]));
 }
 
 glm::vec3 Transform::right() const
 {
-    return glm::vec3(matrix() * glm::vec4(RIGHT, 0.0));
+    return glm::normalize(glm::cross(up(), forward()));
 }
 
 glm::vec3 Transform::up() const
 {
-    return glm::vec3(matrix() * glm::vec4(UP, 0.0));
+    return glm::normalize(glm::vec3(glm::inverse(matrix())[1]));
 }

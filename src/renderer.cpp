@@ -603,9 +603,7 @@ void ForwardRenderer::update(Scene const& scene)
 
 	// Upload uniform camera data
 	Transform const& camTransform = scene.nodes.transform[scene.activeCamera];
-	glm::vec3 const camForward = camTransform.forward();
-	glm::vec3 const camUp = camTransform.up();
-	glm::mat4 const camView = glm::lookAt(camTransform.position, camTransform.position + camForward, camUp);
+	glm::mat4 camView = glm::inverse(camTransform.matrix());
 
 	UniformCameraData const cameraData{
 		camTransform.position,
