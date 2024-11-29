@@ -10,6 +10,7 @@
 #include "camera.hpp"
 #include "mesh.hpp"
 #include "render_backend/buffer.hpp"
+#include "render_backend/texture.hpp"
 #include "render_backend/utils.hpp"
 #include "scene.hpp"
 

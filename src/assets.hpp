@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 
+struct Vertex;
 class Mesh;
 class RenderDeviceContext;
 class Scene;
@@ -14,6 +15,15 @@ class Texture;
 /// @param shaderCode Shader code vector.
 /// @return true on success, false otherwise.
 bool readShaderFile(char const* path, std::vector<uint32_t>& shaderCode);
+
+/// @brief Create a mesh object, uploads vertex data to GPU memory.
+/// @param pDeviceContext Render device context to use for mesh creation.
+/// @param vertices 
+/// @param vertexCount 
+/// @param indices 
+/// @param indexCount 
+/// @return A mesh or NULL on error.
+std::shared_ptr<Mesh> createMesh(RenderDeviceContext* pDeviceContext, Vertex* vertices, uint32_t vertexCount, uint32_t* indices, uint32_t indexCount);
 
 /// @brief Load an OBJ file from disk.
 /// @param pDeviceContext Render device context to use for mesh loading.

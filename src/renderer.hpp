@@ -7,10 +7,10 @@
 
 #include "math.hpp"
 #include "render_backend.hpp"
-#include "render_backend/texture.hpp"
 
 class Buffer;
 class Scene;
+class Texture;
 
 /// @brief Renderer interface, manages render passes, pipelines, render command recording, etc. internally.
 class IRenderer
