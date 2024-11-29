@@ -1,5 +1,7 @@
 #include "render_backend.hpp"
 
+#define VOLK_IMPLEMENTATION
+
 #include <cassert>
 #include <stdexcept>
 
