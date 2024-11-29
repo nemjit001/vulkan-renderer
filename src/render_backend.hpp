@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #define VK_NO_PROTOTYPES
@@ -35,12 +36,14 @@ struct CommandContext
 class RenderDeviceContext
 {
 public:
-	RenderDeviceContext() = default;
 	RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t windowWidth, uint32_t windowHeight);
 	~RenderDeviceContext();
 
 	RenderDeviceContext(RenderDeviceContext const&) = delete;
 	RenderDeviceContext& operator=(RenderDeviceContext const&) = delete;
+
+	RenderDeviceContext(RenderDeviceContext&&) = delete;
+	RenderDeviceContext& operator=(RenderDeviceContext&&) = delete;
 
 	/// @brief Start a new frame, acquiring the next available backbuffer.
 	/// @return 
@@ -203,9 +206,5 @@ namespace RenderBackend
 
 	/// @brief Automatically pick a render device.
 	/// @return A pointer to a new render device, or NULL on failure.
-	RenderDeviceContext* pickRenderDevice();
-
-	/// @brief Destroy a render device context.
-	/// @param pContext 
-	void destroyRenderDevice(RenderDeviceContext* pContext);
+	std::unique_ptr<RenderDeviceContext> pickRenderDevice();
 } // namespace RenderBackend

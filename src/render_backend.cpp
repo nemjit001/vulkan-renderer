@@ -726,7 +726,7 @@ namespace RenderBackend
         return instance;
     }
 
-    RenderDeviceContext* pickRenderDevice()
+    std::unique_ptr<RenderDeviceContext> pickRenderDevice()
     {
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
@@ -767,15 +767,6 @@ namespace RenderBackend
 
         int width = 0, height = 0;
         SDL_GetWindowSize(pAssociatedWindow, &width, &height);
-        return new RenderDeviceContext(physicalDevice, surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-    }
-
-    void destroyRenderDevice(RenderDeviceContext* pContext)
-    {
-        if (pContext == nullptr) {
-            return;
-        }
-
-        delete pContext;
+        return std::make_unique<RenderDeviceContext>(physicalDevice, surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
     }
 } // namespace RenderBackend

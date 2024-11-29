@@ -1,12 +1,15 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include "camera_controller.hpp"
 #include "input.hpp"
 #include "timer.hpp"
 
 struct SDL_Window;
+class RenderDeviceContext;
+class IRenderer;
 
 /// @brief the Engine class handles runtime state management.
 class Engine
@@ -45,6 +48,9 @@ private:
 	uint32_t m_framebufferWidth = 0;
 	uint32_t m_framebufferHeight = 0;
 	bool m_captureInput = false;
+
+	std::unique_ptr<RenderDeviceContext> m_pDeviceContext = nullptr;
+	std::unique_ptr<IRenderer> m_pRenderer = nullptr;
 
 	Timer m_frameTimer{};
 	Timer m_cpuUpdateTimer{};

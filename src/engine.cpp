@@ -20,8 +20,6 @@
 #include "scene.hpp"
 #include "transform.hpp"
 
-RenderDeviceContext* pDeviceContext = nullptr;
-IRenderer* pRenderer = nullptr;
 Scene scene{};
 
 Engine::Engine()
@@ -63,16 +61,16 @@ Engine::Engine()
         return;
     }
 
-    pDeviceContext = RenderBackend::pickRenderDevice();
-    if (pDeviceContext == nullptr)
+    m_pDeviceContext = RenderBackend::pickRenderDevice();
+    if (m_pDeviceContext == nullptr)
     {
         printf("VK Renderer no render device available\n");
         m_running = false;
         return;
     }
 
-    pRenderer = new ForwardRenderer(pDeviceContext, m_framebufferWidth, m_framebufferHeight);
-    if (pRenderer == nullptr)
+    m_pRenderer = std::make_unique<ForwardRenderer>(m_pDeviceContext.get(), m_framebufferWidth, m_framebufferHeight);
+    if (m_pRenderer == nullptr)
     {
         printf("VK Renderer renderer init failed\n");
         m_running = false;
@@ -85,14 +83,14 @@ Engine::Engine()
     camera.perspective.FOVy = 60.0F;
     camera.perspective.aspectRatio = static_cast<float>(m_framebufferWidth) / static_cast<float>(m_framebufferHeight);
     camera.perspective.zNear = 1.0F;
-    camera.perspective.zFar = 2500.0F;
+    camera.perspective.zFar = 5000.0F;
     SceneRef cameraRef = scene.addCamera(camera);
     SceneRef cameraNode = scene.createRootNode("Camera", Transform{ { 0.0F, 50.0F, -5.0F } });
     scene.nodes.cameraRef[cameraNode] = cameraRef;
     scene.activeCamera = cameraNode;
 
     // Load scene files from disk
-    if (!loadScene(pDeviceContext, "data/assets/Sponza/sponza.obj", scene))
+    if (!loadScene(m_pDeviceContext.get(), "data/assets/Sponza/sponza.obj", scene))
     {
         printf("VK Renderer scene load failed\n");
         m_running = false;
@@ -106,12 +104,11 @@ Engine::Engine()
 Engine::~Engine()
 {
     printf("Shutting down Vulkan Renderer\n");
-    pRenderer->awaitFrame();
+    m_pRenderer->awaitFrame();
 
     scene.clear();
-    delete pRenderer;
-
-    RenderBackend::destroyRenderDevice(pDeviceContext);
+    m_pRenderer.reset();
+    m_pDeviceContext.reset();
     RenderBackend::shutdown();
 
     ImGui_ImplSDL2_Shutdown();
@@ -133,10 +130,10 @@ void Engine::onResize()
 
     m_framebufferWidth = static_cast<uint32_t>(std::max(width, 1));
     m_framebufferHeight = static_cast<uint32_t>(std::max(height, 1));
-    pRenderer->awaitFrame();
+    m_pRenderer->awaitFrame();
 
-    if (!pDeviceContext->resizeSwapResources(m_framebufferWidth, m_framebufferHeight)
-        || !pRenderer->onResize(m_framebufferWidth, m_framebufferHeight)) {
+    if (!m_pDeviceContext->resizeSwapResources(m_framebufferWidth, m_framebufferHeight)
+        || !m_pRenderer->onResize(m_framebufferWidth, m_framebufferHeight)) {
         m_running = false;
         return;
     }
@@ -147,7 +144,7 @@ void Engine::onResize()
 void Engine::update()
 {
     // Await frame start
-    pRenderer->awaitFrame();
+    m_pRenderer->awaitFrame();
     m_frameTimer.tick();
 
     // Get last update times
@@ -265,8 +262,8 @@ void Engine::update()
     }
 
     // Update subsystems
+    m_pRenderer->update(scene);
     m_inputManager.update();
-    pRenderer->update(scene);
     m_cpuUpdateTimer.tick();
 
     Engine::render();
@@ -274,17 +271,17 @@ void Engine::update()
 
 void Engine::render()
 {
-    if (!pDeviceContext->newFrame())
+    if (!m_pDeviceContext->newFrame())
     {
         Engine::onResize();
         return;
     }
 
     m_cpuRenderTimer.reset();
-    pRenderer->render(scene);
+    m_pRenderer->render(scene);
     m_cpuRenderTimer.tick();
 
-    if (!pDeviceContext->present()) {
+    if (!m_pDeviceContext->present()) {
         Engine::onResize();
     }
     return;
