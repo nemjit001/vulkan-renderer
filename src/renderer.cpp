@@ -617,7 +617,8 @@ void ForwardRenderer::update(Scene const& scene)
 	if (scene.materials.size() > 0)
 	{
 		m_materialDataBuffer.map();
-		void* pBufferDest = m_materialDataBuffer.pData;
+		UniformMaterialData* pMaterialData = reinterpret_cast<UniformMaterialData*>(m_materialDataBuffer.pData);
+		size_t materialIdx = 0;
 		for (auto const& material : scene.materials)
 		{
 			UniformMaterialData const uniformData{
@@ -629,8 +630,8 @@ void ForwardRenderer::update(Scene const& scene)
 			};
 
 
-			memcpy(pBufferDest, &uniformData, sizeof(UniformMaterialData));
-			pBufferDest = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pBufferDest) + sizeof(UniformMaterialData));
+			pMaterialData[materialIdx] = uniformData;
+			materialIdx++;
 		}
 
 		m_materialDataBuffer.unmap();
@@ -645,7 +646,8 @@ void ForwardRenderer::update(Scene const& scene)
 		}
 
 		m_objectDataBuffer.map();
-		void* pBufferDest = m_objectDataBuffer.pData;
+		UniformObjectData* pObjectData = reinterpret_cast<UniformObjectData*>(m_objectDataBuffer.pData);
+		size_t objectIdx = 0;
 		for (auto const& model : m_objectTransforms)
 		{
 			glm::mat4 const normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(model))));
@@ -654,8 +656,8 @@ void ForwardRenderer::update(Scene const& scene)
 				normal
 			};
 
-			memcpy(pBufferDest, &uniformData, sizeof(UniformObjectData));
-			pBufferDest = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pBufferDest) + sizeof(UniformObjectData));
+			pObjectData[objectIdx] = uniformData;
+			objectIdx++;
 		}
 
 		m_objectDataBuffer.unmap();
@@ -689,6 +691,7 @@ void ForwardRenderer::update(Scene const& scene)
 	}
 
 	// Reallocate descriptor sets
+	// FIXME(nemjit001): It takes a lot of time to reallocate descriptor sets each frame, smarter reuse scheme might be useful here
 	vkResetDescriptorPool(m_pDeviceContext->device, m_descriptorPool, /* no flags */ 0);
 	std::vector<VkDescriptorSetLayout> const materialSetLayouts(m_materialSets.size(), m_materialDataSetLayout);
 	std::vector<VkDescriptorSetLayout> const objectSetLayouts(m_objectSets.size(), m_objectDataSetLayout);
