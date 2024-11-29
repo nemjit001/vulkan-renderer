@@ -3,7 +3,7 @@
 #include "assets.hpp"
 
 #include <cstdio>
-#include <vector>
+#include <memory>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define TINYOBJLOADER_IMPLEMENTATION
@@ -191,26 +191,19 @@ bool loadTextureFromMemory(RenderDeviceContext* pDeviceContext, Texture& texture
 
 bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void* pData, size_t size)
 {
-    Buffer uploadBuffer{};
-    if (!pDeviceContext->createBuffer(
-        uploadBuffer,
-        size,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        true
-    )) {
+    std::shared_ptr<Buffer> uploadBuffer = pDeviceContext->createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
+    if (uploadBuffer == nullptr) {
         return false;
     }
 
-    assert(uploadBuffer.mapped && uploadBuffer.pData != nullptr);
-    memcpy(uploadBuffer.pData, pData, uploadBuffer.size);
+    assert(uploadBuffer->mapped() && uploadBuffer->data() != nullptr);
+    memcpy(uploadBuffer->data(), pData, uploadBuffer->size());
 
     // Schedule upload using transient upload buffer
     {
         CommandContext uploadCommandContext{};
         if (!pDeviceContext->createCommandContext(CommandQueueType::Copy, uploadCommandContext))
         {
-            uploadBuffer.destroy();
             return false;
         }
 
@@ -221,7 +214,6 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
         if (VK_FAILED(vkBeginCommandBuffer(uploadCommandContext.handle, &uploadBeginInfo)))
         {
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            uploadBuffer.destroy();
             return false;
         }
 
@@ -261,7 +253,7 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
 
         vkCmdCopyBufferToImage(
             uploadCommandContext.handle,
-            uploadBuffer.handle,
+            uploadBuffer->handle(),
             texture.handle,
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1, &imageCopy
@@ -365,7 +357,6 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
         if (VK_FAILED(vkEndCommandBuffer(uploadCommandContext.handle)))
         {
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            uploadBuffer.destroy();
             return false;
         }
 
@@ -373,7 +364,6 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
         if (!pDeviceContext->createFence(&uploadFence, false))
         {
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            uploadBuffer.destroy();
             return false;
         }
 
@@ -390,7 +380,6 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
         {
             pDeviceContext->destroyFence(uploadFence);
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            uploadBuffer.destroy();
             return false;
         }
 
@@ -399,7 +388,6 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
         pDeviceContext->destroyCommandContext(uploadCommandContext);
     }
 
-    uploadBuffer.destroy();
     return true;
 }
 

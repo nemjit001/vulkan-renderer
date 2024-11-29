@@ -8,7 +8,7 @@
 
 struct Camera;
 struct Mesh;
-struct Texture;
+class Texture;
 
 using SceneRef = uint32_t;
 constexpr SceneRef RefUnused = ~0U;

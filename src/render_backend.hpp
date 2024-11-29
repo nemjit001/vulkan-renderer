@@ -7,8 +7,8 @@
 #include <SDL.h>
 #include <vulkan/vulkan.h>
 
-struct Buffer;
-struct Texture;
+class Buffer;
+class Texture;
 
 /// @brief Command queue types available in a render device context.
 enum class CommandQueueType : uint8_t
@@ -60,14 +60,12 @@ public:
 	bool resizeSwapResources(uint32_t width, uint32_t height);
 
 	/// @brief Create a GPU buffer.
-	/// @param buffer 
 	/// @param size 
 	/// @param usage 
 	/// @param memoryProperties 
 	/// @param createMapped 
-	/// @return 
-	bool createBuffer(
-		Buffer& buffer,
+	/// @return A GPU buffer, NULL on error.
+	std::shared_ptr<Buffer> createBuffer(
 		size_t size,
 		VkBufferUsageFlags usage,
 		VkMemoryPropertyFlags memoryProperties,

@@ -9,6 +9,7 @@
 #include "assets.hpp"
 #include "camera.hpp"
 #include "mesh.hpp"
+#include "render_backend/buffer.hpp"
 #include "render_backend/utils.hpp"
 #include "scene.hpp"
 
@@ -435,9 +436,10 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 		size_t materialBufferSize = sizeof(UniformMaterialData);
 		size_t objectBufferSize = sizeof(UniformObjectData);
 
-		if (!m_pDeviceContext->createBuffer(m_sceneDataBuffer, sceneDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-			|| !m_pDeviceContext->createBuffer(m_materialDataBuffer, materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-			|| !m_pDeviceContext->createBuffer(m_objectDataBuffer, objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+		m_sceneDataBuffer = m_pDeviceContext->createBuffer(sceneDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		m_materialDataBuffer = m_pDeviceContext->createBuffer(materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		m_objectDataBuffer = m_pDeviceContext->createBuffer(objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		if (m_sceneDataBuffer == nullptr || m_materialDataBuffer == nullptr || m_objectDataBuffer == nullptr) {
 			throw std::runtime_error("Forward Renderer uniform buffer create failed");
 		}
 	}
@@ -494,10 +496,6 @@ ForwardRenderer::~ForwardRenderer()
 	vkDestroyDescriptorPool(m_pDeviceContext->device, m_descriptorPool, nullptr);
 
 	vkDestroyDescriptorPool(m_pDeviceContext->device, m_guiDescriptorPool, nullptr);
-
-	m_objectDataBuffer.destroy();
-	m_materialDataBuffer.destroy();
-	m_sceneDataBuffer.destroy();
 
 	// Destroy forward rendering pipeline
 	vkDestroyPipeline(m_pDeviceContext->device, m_forwardOpaquePipeline, nullptr);
@@ -581,24 +579,24 @@ void ForwardRenderer::update(Scene const& scene)
 	size_t const materialBufferSize = scene.materials.size() * sizeof(UniformMaterialData);
 	size_t const objectBufferSize = scene.nodes.count * sizeof(UniformObjectData);
 	
-	if (materialBufferSize > m_materialDataBuffer.size)
+	if (materialBufferSize > m_materialDataBuffer->size())
 	{
-		m_materialDataBuffer.destroy();
-		if (!m_pDeviceContext->createBuffer(m_materialDataBuffer, materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+		m_materialDataBuffer = m_pDeviceContext->createBuffer(materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		if (m_materialDataBuffer == nullptr) {
 			throw std::runtime_error("Forward Renderer update uniform material buffer resize failed\n");
 		}
 
-		printf("Forward Renderer material uniform resized: %zu bytes\n", m_materialDataBuffer.size);
+		printf("Forward Renderer material uniform resized: %zu bytes\n", m_materialDataBuffer->size());
 	}
 
-	if (objectBufferSize > m_objectDataBuffer.size)
+	if (objectBufferSize > m_objectDataBuffer->size())
 	{
-		m_objectDataBuffer.destroy();
-		if (!m_pDeviceContext->createBuffer(m_objectDataBuffer, objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+		m_objectDataBuffer = m_pDeviceContext->createBuffer(objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		if (m_objectDataBuffer == nullptr) {
 			throw std::runtime_error("Forward Renderer update uniform object buffer resize failed\n");
 		}
 
-		printf("Forward Renderer object uniform resized: %zu bytes\n", m_objectDataBuffer.size);
+		printf("Forward Renderer object uniform resized: %zu bytes\n", m_objectDataBuffer->size());
 	}
 
 	// Upload uniform camera data
@@ -609,15 +607,15 @@ void ForwardRenderer::update(Scene const& scene)
 		camera.matrix() * glm::lookAt(camTransform.position + camTransform.forward(), camTransform.position, UP),
 	};
 
-	m_sceneDataBuffer.map();
-	memcpy(m_sceneDataBuffer.pData, &cameraData, sizeof(UniformCameraData));
-	m_sceneDataBuffer.unmap();
+	m_sceneDataBuffer->map();
+	memcpy(m_sceneDataBuffer->data(), &cameraData, sizeof(UniformCameraData));
+	m_sceneDataBuffer->unmap();
 
 	// Upload uniform material data if it exists
 	if (scene.materials.size() > 0)
 	{
-		m_materialDataBuffer.map();
-		UniformMaterialData* pMaterialData = reinterpret_cast<UniformMaterialData*>(m_materialDataBuffer.pData);
+		m_materialDataBuffer->map();
+		UniformMaterialData* pMaterialData = reinterpret_cast<UniformMaterialData*>(m_materialDataBuffer->data());
 		size_t materialIdx = 0;
 		for (auto const& material : scene.materials)
 		{
@@ -634,7 +632,7 @@ void ForwardRenderer::update(Scene const& scene)
 			materialIdx++;
 		}
 
-		m_materialDataBuffer.unmap();
+		m_materialDataBuffer->unmap();
 	}
 
 	// Upload uniform object data if it exists
@@ -645,8 +643,8 @@ void ForwardRenderer::update(Scene const& scene)
 			SceneHelpers::calcWorldSpaceTransforms(scene, glm::identity<glm::mat4>(), m_objectTransforms, root);
 		}
 
-		m_objectDataBuffer.map();
-		UniformObjectData* pObjectData = reinterpret_cast<UniformObjectData*>(m_objectDataBuffer.pData);
+		m_objectDataBuffer->map();
+		UniformObjectData* pObjectData = reinterpret_cast<UniformObjectData*>(m_objectDataBuffer->data());
 		size_t objectIdx = 0;
 		for (auto const& model : m_objectTransforms)
 		{
@@ -660,7 +658,7 @@ void ForwardRenderer::update(Scene const& scene)
 			objectIdx++;
 		}
 
-		m_objectDataBuffer.unmap();
+		m_objectDataBuffer->unmap();
 	}
 
 	// Size descriptor set arrays for this frame & recreate descriptor pool
@@ -738,7 +736,7 @@ void ForwardRenderer::update(Scene const& scene)
 	descriptorWrites.reserve(2 + scene.materials.size() + scene.nodes.count);
 
 	VkDescriptorBufferInfo cameraDataBufferInfo{};
-	cameraDataBufferInfo.buffer = m_sceneDataBuffer.handle;
+	cameraDataBufferInfo.buffer = m_sceneDataBuffer->handle();
 	cameraDataBufferInfo.offset = 0;
 	cameraDataBufferInfo.range = sizeof(UniformCameraData);
 	bufferInfos.emplace_back(cameraDataBufferInfo);
@@ -773,7 +771,7 @@ void ForwardRenderer::update(Scene const& scene)
 	for (size_t materialIdx = 0; materialIdx < scene.materials.size(); materialIdx++)
 	{
 		VkDescriptorBufferInfo materialDataBufferInfo{};
-		materialDataBufferInfo.buffer = m_materialDataBuffer.handle;
+		materialDataBufferInfo.buffer = m_materialDataBuffer->handle();
 		materialDataBufferInfo.offset = materialIdx * sizeof(UniformMaterialData);
 		materialDataBufferInfo.range = sizeof(UniformMaterialData);
 		bufferInfos.emplace_back(materialDataBufferInfo);
@@ -791,7 +789,7 @@ void ForwardRenderer::update(Scene const& scene)
 	for (size_t nodeIdx = 0; nodeIdx < scene.nodes.count; nodeIdx++)
 	{
 		VkDescriptorBufferInfo objectDataBufferInfo{};
-		objectDataBufferInfo.buffer = m_objectDataBuffer.handle;
+		objectDataBufferInfo.buffer = m_objectDataBuffer->handle();
 		objectDataBufferInfo.offset = nodeIdx * sizeof(UniformObjectData);
 		objectDataBufferInfo.range = sizeof(UniformObjectData);
 		bufferInfos.emplace_back(objectDataBufferInfo);
@@ -882,9 +880,10 @@ void ForwardRenderer::render(Scene const& scene)
 				assert(meshRef != RefUnused);
 
 				Mesh const& mesh = scene.meshes[meshRef];
+				VkBuffer vertexBuffers[] = { mesh.vertexBuffer->handle(), };
 				VkDeviceSize const offsets[] = { 0, };
-				vkCmdBindVertexBuffers(m_frameCommands.handle, 0, 1, &mesh.vertexBuffer.handle, offsets);
-				vkCmdBindIndexBuffer(m_frameCommands.handle, mesh.indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+				vkCmdBindVertexBuffers(m_frameCommands.handle, 0, SIZEOF_ARRAY(vertexBuffers), vertexBuffers, offsets);
+				vkCmdBindIndexBuffer(m_frameCommands.handle, mesh.indexBuffer->handle(), 0, VK_INDEX_TYPE_UINT32);
 				vkCmdDrawIndexed(m_frameCommands.handle, mesh.indexCount, 1, 0, 0, 0);
 			}
 		}

@@ -3,11 +3,10 @@
 #include <cstdint>
 #include <vector>
 
-struct Buffer;
-struct Texture;
 struct Mesh;
 class RenderDeviceContext;
 class Scene;
+class Texture;
 
 /// @brief Read a binary shader file.
 /// @param path Path to the shader file.

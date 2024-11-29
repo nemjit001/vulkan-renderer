@@ -3,12 +3,13 @@
 #include <volk.h>
 
 #include "render_backend.hpp"
+#include "render_backend/buffer.hpp"
 #include "render_backend/utils.hpp"
 
 void Mesh::destroy()
 {
-    indexBuffer.destroy();
-    vertexBuffer.destroy();
+    indexBuffer.reset();
+    vertexBuffer.reset();
 }
 
 bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertices, uint32_t vertexCount, uint32_t* indices, uint32_t indexCount)
@@ -24,33 +25,26 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
     uint32_t const vertexBufferSize = sizeof(Vertex) * vertexCount;
     uint32_t const indexBufferSize = sizeof(uint32_t) * indexCount;
 
-    Buffer vertexUploadBuffer{};
-    Buffer indexUploadBuffer{};
-    if (!pDeviceContext->createBuffer(vertexUploadBuffer, vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true)
-        || !pDeviceContext->createBuffer(indexUploadBuffer, indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true)) {
+    std::shared_ptr<Buffer> vertexUploadBuffer = pDeviceContext->createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
+    std::shared_ptr<Buffer> indexUploadBuffer = pDeviceContext->createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
+    if (vertexUploadBuffer == nullptr || indexUploadBuffer == nullptr) {
         return false;
     }
 
-    if (!pDeviceContext->createBuffer(mesh.vertexBuffer, vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-        || !pDeviceContext->createBuffer(mesh.indexBuffer, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+    mesh.vertexBuffer = pDeviceContext->createBuffer(vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    mesh.indexBuffer = pDeviceContext->createBuffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (mesh.vertexBuffer == nullptr || mesh.indexBuffer == nullptr) {
         return false;
     } 
 
-    assert(vertexUploadBuffer.mapped
-        && vertexUploadBuffer.pData != nullptr
-        && indexUploadBuffer.mapped
-        && indexUploadBuffer.pData != nullptr
-    );
-    memcpy(vertexUploadBuffer.pData, vertices, vertexBufferSize);
-    memcpy(indexUploadBuffer.pData, indices, indexBufferSize);
+    assert(vertexUploadBuffer->mapped() && indexUploadBuffer->mapped());
+    memcpy(vertexUploadBuffer->data(), vertices, vertexBufferSize);
+    memcpy(indexUploadBuffer->data(), indices, indexBufferSize);
 
     // Schedule upload using transient upload buffer
     {
         CommandContext uploadCommandContext{};
-        if (!pDeviceContext->createCommandContext(CommandQueueType::Copy, uploadCommandContext))
-        {
-            indexUploadBuffer.destroy();
-            vertexUploadBuffer.destroy();
+        if (!pDeviceContext->createCommandContext(CommandQueueType::Copy, uploadCommandContext)) {
             return false;
         }
 
@@ -61,8 +55,6 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         if (VK_FAILED(vkBeginCommandBuffer(uploadCommandContext.handle, &uploadBeginInfo)))
         {
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            indexUploadBuffer.destroy();
-            vertexUploadBuffer.destroy();
             return false;
         }
 
@@ -76,14 +68,12 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         indexCopy.dstOffset = 0;
         indexCopy.size = indexBufferSize;
 
-        vkCmdCopyBuffer(uploadCommandContext.handle, vertexUploadBuffer.handle, mesh.vertexBuffer.handle, 1, &vertexCopy);
-        vkCmdCopyBuffer(uploadCommandContext.handle, indexUploadBuffer.handle, mesh.indexBuffer.handle, 1, &indexCopy);
+        vkCmdCopyBuffer(uploadCommandContext.handle, vertexUploadBuffer->handle(), mesh.vertexBuffer->handle(), 1, &vertexCopy);
+        vkCmdCopyBuffer(uploadCommandContext.handle, indexUploadBuffer->handle(), mesh.indexBuffer->handle(), 1, &indexCopy);
 
         if (VK_FAILED(vkEndCommandBuffer(uploadCommandContext.handle)))
         {
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            indexUploadBuffer.destroy();
-            vertexUploadBuffer.destroy();
             return false;
         }
 
@@ -91,8 +81,6 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         if (!pDeviceContext->createFence(&uploadFence, false))
         {
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            indexUploadBuffer.destroy();
-            vertexUploadBuffer.destroy();
             return false;
         }
 
@@ -109,8 +97,6 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         {
             pDeviceContext->destroyFence(uploadFence);
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            indexUploadBuffer.destroy();
-            vertexUploadBuffer.destroy();
             return false;
         }
 
@@ -119,7 +105,5 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         pDeviceContext->destroyCommandContext(uploadCommandContext);
     }
 
-    indexUploadBuffer.destroy();
-    vertexUploadBuffer.destroy();
     return true;
 }

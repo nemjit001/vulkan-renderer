@@ -330,8 +330,7 @@ bool RenderDeviceContext::resizeSwapResources(uint32_t width, uint32_t height)
     return true;
 }
 
-bool RenderDeviceContext::createBuffer(
-    Buffer& buffer,
+std::shared_ptr<Buffer> RenderDeviceContext::createBuffer(
     size_t size,
     VkBufferUsageFlags usage,
     VkMemoryPropertyFlags properties,
@@ -340,40 +339,38 @@ bool RenderDeviceContext::createBuffer(
 {
     assert(size > 0);
 
-    buffer.device = device;
-    buffer.size = size;
-    buffer.mapped = false;
-    buffer.pData = nullptr;
-
     VkBufferCreateInfo bufferCreateInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     bufferCreateInfo.flags = 0;
     bufferCreateInfo.usage = usage;
     bufferCreateInfo.size = size;
     bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (VK_FAILED(vkCreateBuffer(device, &bufferCreateInfo, nullptr, &buffer.handle)))
+    VkBuffer buffer = VK_NULL_HANDLE;
+    if (VK_FAILED(vkCreateBuffer(device, &bufferCreateInfo, nullptr, &buffer)))
     {
-        return false;
+        return nullptr;
     }
 
     VkMemoryRequirements memRequirements{};
-    vkGetBufferMemoryRequirements(device, buffer.handle, &memRequirements);
+    vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
 
     VkMemoryAllocateInfo allocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
     allocateInfo.allocationSize = memRequirements.size;
     allocateInfo.memoryTypeIndex = getMemoryTypeIndex(memRequirements, properties);
 
-    if (VK_FAILED(vkAllocateMemory(device, &allocateInfo, nullptr, &buffer.memory)))
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (VK_FAILED(vkAllocateMemory(device, &allocateInfo, nullptr, &memory)))
     {
-        return false;
+        return nullptr;
     }
-    vkBindBufferMemory(device, buffer.handle, buffer.memory, 0);
+    vkBindBufferMemory(device, buffer, memory, 0);
 
+    std::shared_ptr<Buffer> pBuffer = std::make_shared<Buffer>(device, buffer, memory, size);
     if (createMapped) {
-        buffer.map();
+        pBuffer->map();
     }
 
-    return true;
+    return pBuffer;
 }
 
 bool RenderDeviceContext::createTexture(

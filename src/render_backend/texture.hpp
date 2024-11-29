@@ -4,8 +4,9 @@
 #include "vulkan/vulkan.h"
 
 /// @brief GPU texture with associated data.
-struct Texture
+class Texture
 {
+public:
 	/// @brief Destroy this texture.
 	void destroy();
 

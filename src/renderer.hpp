@@ -1,14 +1,15 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include "math.hpp"
 #include "render_backend.hpp"
-#include "render_backend/buffer.hpp"
 #include "render_backend/texture.hpp"
 
+class Buffer;
 class Scene;
 
 /// @brief Renderer interface, manages render passes, pipelines, render command recording, etc. internally.
@@ -103,9 +104,9 @@ protected:
 	VkPipeline m_forwardOpaquePipeline = VK_NULL_HANDLE;
 
 	//-- Uniform buffers --//
-	Buffer m_sceneDataBuffer{}; //< contains camera data.
-	Buffer m_materialDataBuffer{}; //< contains all materials in the scene.
-	Buffer m_objectDataBuffer{}; //< contains a node's world transforms (model + normal matrix).
+	std::shared_ptr<Buffer> m_sceneDataBuffer = nullptr; //< contains camera data.
+	std::shared_ptr<Buffer> m_materialDataBuffer = nullptr; //< contains all materials in the scene.
+	std::shared_ptr<Buffer> m_objectDataBuffer = nullptr; //< contains a node's world transforms (model + normal matrix).
 	std::vector<glm::mat4> m_objectTransforms{}; //< contains cached world space transforms
 
 	//-- GUI state management --//
