@@ -73,7 +73,6 @@ public:
 	);
 
 	/// @brief Create a GPU texture.
-	/// @param texture 
 	/// @param imageType 
 	/// @param format 
 	/// @param usage 
@@ -87,8 +86,7 @@ public:
 	/// @param tiling 
 	/// @param initialLayout 
 	/// @return 
-	bool createTexture(
-		Texture& texture,
+	std::shared_ptr<Texture> createTexture(
 		VkImageType imageType,
 		VkFormat format,
 		VkImageUsageFlags usage,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 struct Mesh;
@@ -24,17 +25,15 @@ bool loadOBJ(RenderDeviceContext* pDeviceContext, char const* path, Mesh& mesh);
 /// @brief Load a texture from disk, mipmaps are generated automatically on load.
 /// @param pDeviceContext Device context to use for texture loading.
 /// @param path 
-/// @param texture 
-/// @return A boolean indicating success.
-bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture& texture);
+/// @return A texture or NULL on error.
+std::shared_ptr<Texture> loadTexture(RenderDeviceContext* pDeviceContext, char const* path);
 
 /// @brief Load a texture from memory, mipmaps are generated automatically on load.
 /// @param pDeviceContext Device context to use for texture loading.
-/// @param texture 
 /// @param pData 
 /// @param size
-/// @return A boolean indicating success.
-bool loadTextureFromMemory(RenderDeviceContext* pDeviceContext, Texture& texture, void* pData, size_t size);
+/// @return A texture or NULL on error.
+std::shared_ptr<Texture> loadTextureFromMemory(RenderDeviceContext* pDeviceContext, void* pData, size_t size);
 
 /// @brief Upload data to a texture. Mipmaps are generated for the texture automatically. The size of the data buffer must be the same
 /// as the 0th mip level extent * channels.
@@ -43,7 +42,7 @@ bool loadTextureFromMemory(RenderDeviceContext* pDeviceContext, Texture& texture
 /// @param pData 
 /// @param size 
 /// @return A boolean indicating success.
-bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void* pData, size_t size);
+bool uploadToTexture(RenderDeviceContext* pDeviceContext, std::shared_ptr<Texture> texture, void* pData, size_t size);
 
 /// @brief Load a scene file from disk.
 /// @param pDeviceContext 

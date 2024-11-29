@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -31,7 +32,7 @@ public:
 
     SceneRef addMesh(Mesh const& mesh);
 
-    SceneRef addTexture(Texture const& texture);
+    SceneRef addTexture(std::shared_ptr<Texture> texture);
 
     SceneRef addMaterial(Material const& material);
 
@@ -54,7 +55,7 @@ public:
 
     std::vector<Camera> cameras{};
     std::vector<Mesh> meshes{};
-    std::vector<Texture> textures{};
+    std::vector<std::shared_ptr<Texture>> textures{};
     std::vector<Material> materials{};
 
     struct

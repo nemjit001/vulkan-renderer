@@ -111,7 +111,7 @@ bool loadOBJ(RenderDeviceContext* pDeviceContext, char const* path, Mesh& mesh)
     return createMesh(pDeviceContext, mesh, vertices.data(), static_cast<uint32_t>(vertices.size()), indices.data(), static_cast<uint32_t>(indices.size()));
 }
 
-bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture& texture)
+std::shared_ptr<Texture> loadTexture(RenderDeviceContext* pDeviceContext, char const* path)
 {
     int width = 0, height = 0, channels = 0;
     stbi_uc* pImageData = stbi_load(path, &width, &height, &channels, 4);
@@ -127,30 +127,23 @@ bool loadTexture(RenderDeviceContext* pDeviceContext, char const* path, Texture&
     channels = 4;
 
     printf("Loaded texture [%s] (%d x %d x %d, %d mips)\n", path, width, height, channels, mipLevels);
-    if (!pDeviceContext->createTexture(
-        texture,
-        VK_IMAGE_TYPE_2D,
-        imageFormat,
+    std::shared_ptr<Texture> texture = pDeviceContext->createTexture(
+        VK_IMAGE_TYPE_2D, imageFormat,
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1,
-        mipLevels
-    )) {
-        stbi_image_free(pImageData);
-        return false;
-    }
+        static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1, mipLevels
+    );
 
-    if (!uploadToTexture(pDeviceContext, texture, pImageData, width * height * channels))
-    {
+    if (texture == nullptr || !uploadToTexture(pDeviceContext, texture, pImageData, width * height * channels)) {
         stbi_image_free(pImageData);
-        return false;
+        return nullptr;
     }
 
     stbi_image_free(pImageData);
-    return true;
+    return texture;
 }
 
-bool loadTextureFromMemory(RenderDeviceContext* pDeviceContext, Texture& texture, void* pData, size_t size)
+std::shared_ptr<Texture> loadTextureFromMemory(RenderDeviceContext* pDeviceContext, void* pData, size_t size)
 {
     int width = 0, height = 0, channels = 0;
     stbi_uc* pImageData = stbi_load_from_memory(reinterpret_cast<stbi_uc*>(pData), static_cast<int>(size), &width, &height, &channels, 4);
@@ -166,30 +159,24 @@ bool loadTextureFromMemory(RenderDeviceContext* pDeviceContext, Texture& texture
     channels = 4;
 
     printf("Loaded texture from memory (%d x %d x %d, %d mips)\n", width, height, channels, mipLevels);
-    if (!pDeviceContext->createTexture(
-        texture,
-        VK_IMAGE_TYPE_2D,
-        imageFormat,
+    std::shared_ptr<Texture> texture = pDeviceContext->createTexture(
+        VK_IMAGE_TYPE_2D, imageFormat,
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1,
-        mipLevels
-    )) {
-        stbi_image_free(pImageData);
-        return false;
-    }
+        static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1, mipLevels
+    );
 
-    if (!uploadToTexture(pDeviceContext, texture, pImageData, width * height * channels))
+    if (texture == nullptr || !uploadToTexture(pDeviceContext, texture, pImageData, width * height * channels))
     {
         stbi_image_free(pImageData);
-        return false;
+        return nullptr;
     }
 
     stbi_image_free(pImageData);
-    return true;
+    return texture;
 }
 
-bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void* pData, size_t size)
+bool uploadToTexture(RenderDeviceContext* pDeviceContext, std::shared_ptr<Texture> texture, void* pData, size_t size)
 {
     std::shared_ptr<Buffer> uploadBuffer = pDeviceContext->createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
     if (uploadBuffer == nullptr) {
@@ -224,11 +211,11 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
         transferBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         transferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         transferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        transferBarrier.image = texture.handle;
+        transferBarrier.image = texture->handle;
         transferBarrier.subresourceRange.baseMipLevel = 0;
-        transferBarrier.subresourceRange.levelCount = texture.levels;
+        transferBarrier.subresourceRange.levelCount = texture->levels;
         transferBarrier.subresourceRange.baseArrayLayer = 0;
-        transferBarrier.subresourceRange.layerCount = texture.depthOrLayers;
+        transferBarrier.subresourceRange.layerCount = texture->size.depthOrLayers;
         transferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
         vkCmdPipelineBarrier(uploadCommandContext.handle,
@@ -242,27 +229,27 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
 
         VkBufferImageCopy imageCopy{};
         imageCopy.bufferOffset = 0;
-        imageCopy.bufferRowLength = texture.width;
-        imageCopy.bufferImageHeight = texture.height;
+        imageCopy.bufferRowLength = texture->size.width;
+        imageCopy.bufferImageHeight = texture->size.height;
         imageCopy.imageSubresource.mipLevel = 0;
         imageCopy.imageSubresource.baseArrayLayer = 0;
         imageCopy.imageSubresource.layerCount = 1;
         imageCopy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         imageCopy.imageOffset = VkOffset3D{ 0, 0, 0 };
-        imageCopy.imageExtent = VkExtent3D{ static_cast<uint32_t>(texture.width), static_cast<uint32_t>(texture.height), 1 };
+        imageCopy.imageExtent = VkExtent3D{ static_cast<uint32_t>(texture->size.width), static_cast<uint32_t>(texture->size.height), 1 };
 
         vkCmdCopyBufferToImage(
             uploadCommandContext.handle,
             uploadBuffer->handle(),
-            texture.handle,
+            texture->handle,
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1, &imageCopy
         );
 
         // XXX: This mip calulcation only works for textures that are powers of 2
-        int32_t srcWidth = static_cast<int32_t>(texture.width);
-        int32_t srcHeight = static_cast<int32_t>(texture.height);
-        for (uint32_t level = 0; level < texture.levels - 1; level++)
+        int32_t srcWidth = static_cast<int32_t>(texture->size.width);
+        int32_t srcHeight = static_cast<int32_t>(texture->size.height);
+        for (uint32_t level = 0; level < texture->levels - 1; level++)
         {
             int32_t dstWidth = srcWidth / 2;
             int32_t dstHeight = srcHeight / 2;
@@ -274,11 +261,11 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
             srcMipBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
             srcMipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             srcMipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            srcMipBarrier.image = texture.handle;
+            srcMipBarrier.image = texture->handle;
             srcMipBarrier.subresourceRange.baseMipLevel = level;
             srcMipBarrier.subresourceRange.levelCount = 1;
             srcMipBarrier.subresourceRange.baseArrayLayer = 0;
-            srcMipBarrier.subresourceRange.layerCount = texture.depthOrLayers;
+            srcMipBarrier.subresourceRange.layerCount = texture->size.depthOrLayers;
             srcMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
             VkImageMemoryBarrier dstMipBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
@@ -288,11 +275,11 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
             dstMipBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             dstMipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             dstMipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            dstMipBarrier.image = texture.handle;
+            dstMipBarrier.image = texture->handle;
             dstMipBarrier.subresourceRange.baseMipLevel = level + 1;
             dstMipBarrier.subresourceRange.levelCount = 1;
             dstMipBarrier.subresourceRange.baseArrayLayer = 0;
-            dstMipBarrier.subresourceRange.layerCount = texture.depthOrLayers;
+            dstMipBarrier.subresourceRange.layerCount = texture->size.depthOrLayers;
             dstMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
             VkImageMemoryBarrier mipBarriers[] = { srcMipBarrier, dstMipBarrier, };
@@ -302,7 +289,7 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
                 0,
                 0, nullptr,
                 0, nullptr,
-                SIZEOF_ARRAY(mipBarriers), mipBarriers
+                static_cast<uint32_t>(std::size(mipBarriers)), mipBarriers
             );
 
             VkImageBlit blitRegion{};
@@ -321,8 +308,8 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
 
             vkCmdBlitImage(
                 uploadCommandContext.handle,
-                texture.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                texture.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                texture->handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                texture->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 1, &blitRegion,
                 VK_FILTER_LINEAR
             );
@@ -338,11 +325,11 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, Texture& texture, void
         shaderBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         shaderBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         shaderBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        shaderBarrier.image = texture.handle;
+        shaderBarrier.image = texture->handle;
         shaderBarrier.subresourceRange.baseMipLevel = 0;
-        shaderBarrier.subresourceRange.levelCount = texture.levels;
+        shaderBarrier.subresourceRange.levelCount = texture->levels;
         shaderBarrier.subresourceRange.baseArrayLayer = 0;
-        shaderBarrier.subresourceRange.layerCount = texture.depthOrLayers;
+        shaderBarrier.subresourceRange.layerCount = texture->size.depthOrLayers;
         shaderBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
         vkCmdPipelineBarrier(uploadCommandContext.handle,
@@ -575,9 +562,8 @@ bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& sce
         size_t const dataSize = pImportedTexture->mHeight == 0 ?
             pImportedTexture->mWidth : pImportedTexture->mWidth * pImportedTexture->mHeight * sizeof(aiTexel);
         
-        Texture texture{};
-        if (!loadTextureFromMemory(pDeviceContext, texture, reinterpret_cast<void*>(pImportedTexture->pcData), dataSize)
-            || !texture.initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT)) {
+        std::shared_ptr<Texture> texture = loadTextureFromMemory(pDeviceContext, reinterpret_cast<void*>(pImportedTexture->pcData), dataSize);
+        if (texture == nullptr || !texture->initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT)) {
             return false;
         }
 

@@ -100,11 +100,11 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 
 			VkRenderPassCreateInfo renderPassCreateInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
 			renderPassCreateInfo.flags = 0;
-			renderPassCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
+			renderPassCreateInfo.attachmentCount = static_cast<uint32_t>(std::size(attachments));
 			renderPassCreateInfo.pAttachments = attachments;
-			renderPassCreateInfo.subpassCount = SIZEOF_ARRAY(subpasses);
+			renderPassCreateInfo.subpassCount = static_cast<uint32_t>(std::size(subpasses));
 			renderPassCreateInfo.pSubpasses = subpasses;
-			renderPassCreateInfo.dependencyCount = SIZEOF_ARRAY(dependencies);
+			renderPassCreateInfo.dependencyCount = static_cast<uint32_t>(std::size(dependencies));
 			renderPassCreateInfo.pDependencies = dependencies;
 
 			if (VK_FAILED(vkCreateRenderPass(m_pDeviceContext->device, &renderPassCreateInfo, nullptr, &m_forwardRenderPass))) {
@@ -114,24 +114,24 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 
 		// Create depth stencil target & forward framebuffers
 		{
-			if (!m_pDeviceContext->createTexture(
-				m_depthStencilTexture,
+			m_depthStencilTexture = m_pDeviceContext->createTexture(
 				VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_framebufferWidth, m_framebufferHeight, 1)
-				|| !m_depthStencilTexture.initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_DEPTH_BIT))
-			{
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_framebufferWidth, m_framebufferHeight, 1
+			);
+
+			if (m_depthStencilTexture == nullptr || !m_depthStencilTexture->initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_DEPTH_BIT)) {
 				throw std::runtime_error("Forward Renderer depth stencil texture create failed\n");
 			}
 
 			auto backbuffers = m_pDeviceContext->getBackbuffers();
 			for (auto& backbuffer : backbuffers)
 			{
-				VkImageView attachments[] = { backbuffer.view, m_depthStencilTexture.view, };
+				VkImageView attachments[] = { backbuffer.view, m_depthStencilTexture->view, };
 
 				VkFramebufferCreateInfo framebufferCreateInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
 				framebufferCreateInfo.flags = 0;
 				framebufferCreateInfo.renderPass = m_forwardRenderPass;
-				framebufferCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
+				framebufferCreateInfo.attachmentCount = static_cast<uint32_t>(std::size(attachments));
 				framebufferCreateInfo.pAttachments = attachments;
 				framebufferCreateInfo.width = m_framebufferWidth;
 				framebufferCreateInfo.height = m_framebufferHeight;
@@ -208,7 +208,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			VkDescriptorSetLayoutBinding sceneDataBindings[] = { cameraDataBinding, textureArrayBinding, };
 			VkDescriptorSetLayoutCreateInfo sceneDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 			sceneDataSetLayout.flags = 0;
-			sceneDataSetLayout.bindingCount = SIZEOF_ARRAY(sceneDataBindings);
+			sceneDataSetLayout.bindingCount = static_cast<uint32_t>(std::size(sceneDataBindings));
 			sceneDataSetLayout.pBindings = sceneDataBindings;
 
 			VkDescriptorSetLayoutBinding materialDataBinding{};
@@ -221,7 +221,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			VkDescriptorSetLayoutBinding materialDataBindings[] = { materialDataBinding, };
 			VkDescriptorSetLayoutCreateInfo materialDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 			materialDataSetLayout.flags = 0;
-			materialDataSetLayout.bindingCount = SIZEOF_ARRAY(materialDataBindings);
+			materialDataSetLayout.bindingCount = static_cast<uint32_t>(std::size(materialDataBindings));
 			materialDataSetLayout.pBindings = materialDataBindings;
 
 			VkDescriptorSetLayoutBinding objectDataBinding{};
@@ -234,7 +234,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			VkDescriptorSetLayoutBinding objectDataBindings[] = { objectDataBinding, };
 			VkDescriptorSetLayoutCreateInfo objectDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 			objectDataSetLayout.flags = 0;
-			objectDataSetLayout.bindingCount = SIZEOF_ARRAY(objectDataBindings);
+			objectDataSetLayout.bindingCount = static_cast<uint32_t>(std::size(objectDataBindings));
 			objectDataSetLayout.pBindings = objectDataBindings;
 
 			if (VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &sceneDataSetLayout, nullptr, &m_sceneDataSetLayout))
@@ -249,7 +249,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			VkDescriptorSetLayout setLayouts[] = { m_sceneDataSetLayout, m_materialDataSetLayout, m_objectDataSetLayout, };
 			VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 			pipelineLayoutCreateInfo.flags = 0;
-			pipelineLayoutCreateInfo.setLayoutCount = SIZEOF_ARRAY(setLayouts);
+			pipelineLayoutCreateInfo.setLayoutCount = static_cast<uint32_t>(std::size(setLayouts));
 			pipelineLayoutCreateInfo.pSetLayouts = setLayouts;
 			pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
 			pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
@@ -315,9 +315,9 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 
 			VkPipelineVertexInputStateCreateInfo vertexInputState{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
 			vertexInputState.flags = 0;
-			vertexInputState.vertexBindingDescriptionCount = SIZEOF_ARRAY(bindingDescriptions);
+			vertexInputState.vertexBindingDescriptionCount = static_cast<uint32_t>(std::size(bindingDescriptions));
 			vertexInputState.pVertexBindingDescriptions = bindingDescriptions;
-			vertexInputState.vertexAttributeDescriptionCount = SIZEOF_ARRAY(attributeDescriptions);
+			vertexInputState.vertexAttributeDescriptionCount = static_cast<uint32_t>(std::size(attributeDescriptions));
 			vertexInputState.pVertexAttributeDescriptions = attributeDescriptions;
 
 			VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
@@ -389,7 +389,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			colorBlendState.flags = 0;
 			colorBlendState.logicOpEnable = VK_FALSE;
 			colorBlendState.logicOp = VK_LOGIC_OP_CLEAR;
-			colorBlendState.attachmentCount = SIZEOF_ARRAY(colorBlendAttachments);
+			colorBlendState.attachmentCount = static_cast<uint32_t>(std::size(colorBlendAttachments));
 			colorBlendState.pAttachments = colorBlendAttachments;
 			colorBlendState.blendConstants[0] = 0.0F;
 			colorBlendState.blendConstants[1] = 0.0F;
@@ -399,12 +399,12 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, };
 			VkPipelineDynamicStateCreateInfo dynamicState{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
 			dynamicState.flags = 0;
-			dynamicState.dynamicStateCount = SIZEOF_ARRAY(dynamicStates);
+			dynamicState.dynamicStateCount = static_cast<uint32_t>(std::size(dynamicStates));
 			dynamicState.pDynamicStates = dynamicStates;
 
 			VkGraphicsPipelineCreateInfo forwardOpaqueCreateInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
 			forwardOpaqueCreateInfo.flags = 0;
-			forwardOpaqueCreateInfo.stageCount = SIZEOF_ARRAY(forwardOpaqueStages);
+			forwardOpaqueCreateInfo.stageCount = static_cast<uint32_t>(std::size(forwardOpaqueStages));
 			forwardOpaqueCreateInfo.pStages = forwardOpaqueStages;
 			forwardOpaqueCreateInfo.pVertexInputState = &vertexInputState;
 			forwardOpaqueCreateInfo.pInputAssemblyState = &inputAssemblyState;
@@ -453,7 +453,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 		VkDescriptorPoolCreateInfo guiPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 		guiPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 		guiPoolCreateInfo.maxSets = 1;
-		guiPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(guiPoolSizes);
+		guiPoolCreateInfo.poolSizeCount = static_cast<uint32_t>(std::size(guiPoolSizes));
 		guiPoolCreateInfo.pPoolSizes = guiPoolSizes;
 
 		if (VK_FAILED(vkCreateDescriptorPool(m_pDeviceContext->device, &guiPoolCreateInfo, nullptr, &m_guiDescriptorPool))) {
@@ -514,7 +514,6 @@ ForwardRenderer::~ForwardRenderer()
 	for (auto& framebuffer : m_forwardFramebuffers) {
 		vkDestroyFramebuffer(m_pDeviceContext->device, framebuffer, nullptr);
 	}
-	m_depthStencilTexture.destroy();
 	vkDestroyRenderPass(m_pDeviceContext->device, m_forwardRenderPass, nullptr);
 
 	// Destroy command data
@@ -538,27 +537,26 @@ bool ForwardRenderer::onResize(uint32_t width, uint32_t height)
 		vkDestroyFramebuffer(m_pDeviceContext->device, framebuffer, nullptr);
 	}
 	m_forwardFramebuffers.clear();
-	m_depthStencilTexture.destroy();
 
 	// Create swap dependent resources
-	if (!m_pDeviceContext->createTexture(
-			m_depthStencilTexture,
-			VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_framebufferWidth, m_framebufferHeight, 1)
-		|| !m_depthStencilTexture.initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_DEPTH_BIT))
-	{
+	m_depthStencilTexture = m_pDeviceContext->createTexture(
+		VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_framebufferWidth, m_framebufferHeight, 1
+	);
+
+	if (m_depthStencilTexture == nullptr || !m_depthStencilTexture->initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_DEPTH_BIT)) {
 		return false;
 	}
 
 	auto backbuffers = m_pDeviceContext->getBackbuffers();
 	for (auto& backbuffer : backbuffers)
 	{
-		VkImageView attachments[] = { backbuffer.view, m_depthStencilTexture.view, };
+		VkImageView attachments[] = { backbuffer.view, m_depthStencilTexture->view, };
 
 		VkFramebufferCreateInfo framebufferCreateInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
 		framebufferCreateInfo.flags = 0;
 		framebufferCreateInfo.renderPass = m_forwardRenderPass;
-		framebufferCreateInfo.attachmentCount = SIZEOF_ARRAY(attachments);
+		framebufferCreateInfo.attachmentCount = static_cast<uint32_t>(std::size(attachments));
 		framebufferCreateInfo.pAttachments = attachments;
 		framebufferCreateInfo.width = m_framebufferWidth;
 		framebufferCreateInfo.height = m_framebufferHeight;
@@ -677,7 +675,7 @@ void ForwardRenderer::update(Scene const& scene)
 		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 		descriptorPoolCreateInfo.flags = 0;
 		descriptorPoolCreateInfo.maxSets = m_maxDescriptorSets;
-		descriptorPoolCreateInfo.poolSizeCount = SIZEOF_ARRAY(poolSizes);
+		descriptorPoolCreateInfo.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
 		descriptorPoolCreateInfo.pPoolSizes = poolSizes;
 
 		vkDestroyDescriptorPool(m_pDeviceContext->device, m_descriptorPool, nullptr);
@@ -754,7 +752,7 @@ void ForwardRenderer::update(Scene const& scene)
 	{
 		VkDescriptorImageInfo textureImageInfo{};
 		textureImageInfo.sampler = m_textureSampler;
-		textureImageInfo.imageView = scene.textures[textureIdx].view;
+		textureImageInfo.imageView = scene.textures[textureIdx]->view;
 		textureImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		imageInfos.emplace_back(textureImageInfo);
 		
@@ -839,7 +837,7 @@ void ForwardRenderer::render(Scene const& scene)
 		forwardPassBeginInfo.renderPass = m_forwardRenderPass;
 		forwardPassBeginInfo.framebuffer = m_forwardFramebuffers[backbufferIndex];
 		forwardPassBeginInfo.renderArea = VkRect2D{ { 0, 0 }, { m_framebufferWidth, m_framebufferHeight } };
-		forwardPassBeginInfo.clearValueCount = SIZEOF_ARRAY(clearValues);
+		forwardPassBeginInfo.clearValueCount = static_cast<uint32_t>(std::size(clearValues));
 		forwardPassBeginInfo.pClearValues = clearValues;
 		vkCmdBeginRenderPass(m_frameCommands.handle, &forwardPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 		
@@ -882,7 +880,7 @@ void ForwardRenderer::render(Scene const& scene)
 				Mesh const& mesh = scene.meshes[meshRef];
 				VkBuffer vertexBuffers[] = { mesh.vertexBuffer->handle(), };
 				VkDeviceSize const offsets[] = { 0, };
-				vkCmdBindVertexBuffers(m_frameCommands.handle, 0, SIZEOF_ARRAY(vertexBuffers), vertexBuffers, offsets);
+				vkCmdBindVertexBuffers(m_frameCommands.handle, 0, static_cast<uint32_t>(std::size(vertexBuffers)), vertexBuffers, offsets);
 				vkCmdBindIndexBuffer(m_frameCommands.handle, mesh.indexBuffer->handle(), 0, VK_INDEX_TYPE_UINT32);
 				vkCmdDrawIndexed(m_frameCommands.handle, mesh.indexCount, 1, 0, 0, 0);
 			}

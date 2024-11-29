@@ -87,7 +87,7 @@ protected:
 
 	//-- Forward render pass data --//
 	VkRenderPass m_forwardRenderPass = VK_NULL_HANDLE;
-	Texture m_depthStencilTexture{};
+	std::shared_ptr<Texture> m_depthStencilTexture = nullptr;
 	std::vector<VkFramebuffer> m_forwardFramebuffers{};
 
 	//-- Samplers --//
