@@ -11,7 +11,7 @@ SceneRef Scene::addCamera(Camera const& camera)
     return ref;
 }
 
-SceneRef Scene::addMesh(Mesh const& mesh)
+SceneRef Scene::addMesh(std::shared_ptr<Mesh> mesh)
 {
     SceneRef ref = static_cast<SceneRef>(meshes.size());
     meshes.push_back(mesh);
@@ -60,10 +60,6 @@ void Scene::clear()
     nodes.name.clear();
     nodes.transform.clear();
     nodes.cameraRef.clear();
-
-    for (auto& mesh : meshes) {
-        mesh.destroy();
-    }
 
     materials.clear();
     textures.clear();

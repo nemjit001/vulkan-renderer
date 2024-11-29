@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 
-struct Mesh;
+class Mesh;
 class RenderDeviceContext;
 class Scene;
 class Texture;
@@ -18,9 +18,8 @@ bool readShaderFile(char const* path, std::vector<uint32_t>& shaderCode);
 /// @brief Load an OBJ file from disk.
 /// @param pDeviceContext Render device context to use for mesh loading.
 /// @param path 
-/// @param mesh 
 /// @return A boolean indicating success.
-bool loadOBJ(RenderDeviceContext* pDeviceContext, char const* path, Mesh& mesh);
+std::shared_ptr<Mesh> loadOBJ(RenderDeviceContext* pDeviceContext, char const* path);
 
 /// @brief Load a texture from disk, mipmaps are generated automatically on load.
 /// @param pDeviceContext Device context to use for texture loading.

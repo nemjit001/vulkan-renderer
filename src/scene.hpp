@@ -8,7 +8,7 @@
 #include "transform.hpp"
 
 struct Camera;
-struct Mesh;
+class Mesh;
 class Texture;
 
 using SceneRef = uint32_t;
@@ -30,7 +30,7 @@ class Scene
 public:
     SceneRef addCamera(Camera const& camera);
 
-    SceneRef addMesh(Mesh const& mesh);
+    SceneRef addMesh(std::shared_ptr<Mesh> mesh);
 
     SceneRef addTexture(std::shared_ptr<Texture> texture);
 
@@ -54,7 +54,7 @@ public:
     std::vector<SceneRef> rootNodes{};
 
     std::vector<Camera> cameras{};
-    std::vector<Mesh> meshes{};
+    std::vector<std::shared_ptr<Mesh>> meshes{};
     std::vector<std::shared_ptr<Texture>> textures{};
     std::vector<Material> materials{};
 

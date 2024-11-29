@@ -877,12 +877,12 @@ void ForwardRenderer::render(Scene const& scene)
 				SceneRef const meshRef = scene.nodes.meshRef[nodeIdx];
 				assert(meshRef != RefUnused);
 
-				Mesh const& mesh = scene.meshes[meshRef];
-				VkBuffer vertexBuffers[] = { mesh.vertexBuffer->handle(), };
+				std::shared_ptr<Mesh> const& mesh = scene.meshes[meshRef];
+				VkBuffer vertexBuffers[] = { mesh->vertexBuffer->handle(), };
 				VkDeviceSize const offsets[] = { 0, };
 				vkCmdBindVertexBuffers(m_frameCommands.handle, 0, static_cast<uint32_t>(std::size(vertexBuffers)), vertexBuffers, offsets);
-				vkCmdBindIndexBuffer(m_frameCommands.handle, mesh.indexBuffer->handle(), 0, VK_INDEX_TYPE_UINT32);
-				vkCmdDrawIndexed(m_frameCommands.handle, mesh.indexCount, 1, 0, 0, 0);
+				vkCmdBindIndexBuffer(m_frameCommands.handle, mesh->indexBuffer->handle(), 0, VK_INDEX_TYPE_UINT32);
+				vkCmdDrawIndexed(m_frameCommands.handle, mesh->indexCount, 1, 0, 0, 0);
 			}
 		}
 

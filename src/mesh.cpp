@@ -6,21 +6,22 @@
 #include "render_backend/buffer.hpp"
 #include "render_backend/utils.hpp"
 
-void Mesh::destroy()
+Mesh::Mesh(uint32_t vertexCount, uint32_t indexCount, std::shared_ptr<Buffer> vertexBuffer, std::shared_ptr<Buffer> indexBuffer)
+    :
+    vertexCount(vertexCount),
+    indexCount(indexCount),
+    vertexBuffer(vertexBuffer),
+    indexBuffer(indexBuffer)
 {
-    indexBuffer.reset();
-    vertexBuffer.reset();
+    //
 }
 
-bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertices, uint32_t vertexCount, uint32_t* indices, uint32_t indexCount)
+std::shared_ptr<Mesh> createMesh(RenderDeviceContext* pDeviceContext, Vertex* vertices, uint32_t vertexCount, uint32_t* indices, uint32_t indexCount)
 {
     assert(vertices != nullptr);
     assert(indices != nullptr);
     assert(vertexCount > 0);
     assert(indexCount > 0);
-
-    mesh.vertexCount = vertexCount;
-    mesh.indexCount = indexCount;
 
     uint32_t const vertexBufferSize = sizeof(Vertex) * vertexCount;
     uint32_t const indexBufferSize = sizeof(uint32_t) * indexCount;
@@ -28,13 +29,13 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
     std::shared_ptr<Buffer> vertexUploadBuffer = pDeviceContext->createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
     std::shared_ptr<Buffer> indexUploadBuffer = pDeviceContext->createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
     if (vertexUploadBuffer == nullptr || indexUploadBuffer == nullptr) {
-        return false;
+        return nullptr;
     }
 
-    mesh.vertexBuffer = pDeviceContext->createBuffer(vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    mesh.indexBuffer = pDeviceContext->createBuffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (mesh.vertexBuffer == nullptr || mesh.indexBuffer == nullptr) {
-        return false;
+    std::shared_ptr<Buffer> vertexBuffer = pDeviceContext->createBuffer(vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    std::shared_ptr<Buffer> indexBuffer = pDeviceContext->createBuffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vertexBuffer == nullptr || indexBuffer == nullptr) {
+        return nullptr;
     } 
 
     assert(vertexUploadBuffer->mapped() && indexUploadBuffer->mapped());
@@ -45,7 +46,7 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
     {
         CommandContext uploadCommandContext{};
         if (!pDeviceContext->createCommandContext(CommandQueueType::Copy, uploadCommandContext)) {
-            return false;
+            return nullptr;
         }
 
         VkCommandBufferBeginInfo uploadBeginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -55,7 +56,7 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         if (VK_FAILED(vkBeginCommandBuffer(uploadCommandContext.handle, &uploadBeginInfo)))
         {
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            return false;
+            return nullptr;
         }
 
         VkBufferCopy vertexCopy{};
@@ -68,20 +69,20 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         indexCopy.dstOffset = 0;
         indexCopy.size = indexBufferSize;
 
-        vkCmdCopyBuffer(uploadCommandContext.handle, vertexUploadBuffer->handle(), mesh.vertexBuffer->handle(), 1, &vertexCopy);
-        vkCmdCopyBuffer(uploadCommandContext.handle, indexUploadBuffer->handle(), mesh.indexBuffer->handle(), 1, &indexCopy);
+        vkCmdCopyBuffer(uploadCommandContext.handle, vertexUploadBuffer->handle(), vertexBuffer->handle(), 1, &vertexCopy);
+        vkCmdCopyBuffer(uploadCommandContext.handle, indexUploadBuffer->handle(), indexBuffer->handle(), 1, &indexCopy);
 
         if (VK_FAILED(vkEndCommandBuffer(uploadCommandContext.handle)))
         {
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            return false;
+            return nullptr;
         }
 
         VkFence uploadFence = VK_NULL_HANDLE;
         if (!pDeviceContext->createFence(&uploadFence, false))
         {
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            return false;
+            return nullptr;
         }
 
         VkSubmitInfo uploadSubmit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -97,7 +98,7 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         {
             pDeviceContext->destroyFence(uploadFence);
             pDeviceContext->destroyCommandContext(uploadCommandContext);
-            return false;
+            return nullptr;
         }
 
         vkWaitForFences(pDeviceContext->device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
@@ -105,5 +106,5 @@ bool createMesh(RenderDeviceContext* pDeviceContext, Mesh& mesh, Vertex* vertice
         pDeviceContext->destroyCommandContext(uploadCommandContext);
     }
 
-    return true;
+    return std::make_shared<Mesh>(vertexCount, indexCount, vertexBuffer, indexBuffer);
 }

@@ -44,7 +44,7 @@ bool readShaderFile(char const* path, std::vector<uint32_t>& shaderCode)
     return true;
 }
 
-bool loadOBJ(RenderDeviceContext* pDeviceContext, char const* path, Mesh& mesh)
+std::shared_ptr<Mesh> loadOBJ(RenderDeviceContext* pDeviceContext, char const* path)
 {
     tinyobj::ObjReader reader;
     tinyobj::ObjReaderConfig config;
@@ -56,7 +56,7 @@ bool loadOBJ(RenderDeviceContext* pDeviceContext, char const* path, Mesh& mesh)
     if (!reader.ParseFromFile(path))
     {
         printf("TinyOBJ OBJ load failed [%s]\n", path);
-        return false;
+        return nullptr;
     }
     printf("Loaded OBJ mesh [%s]\n", path);
 
@@ -108,7 +108,7 @@ bool loadOBJ(RenderDeviceContext* pDeviceContext, char const* path, Mesh& mesh)
         v2.tangent = tangent;
     }
 
-    return createMesh(pDeviceContext, mesh, vertices.data(), static_cast<uint32_t>(vertices.size()), indices.data(), static_cast<uint32_t>(indices.size()));
+    return createMesh(pDeviceContext, vertices.data(), static_cast<uint32_t>(vertices.size()), indices.data(), static_cast<uint32_t>(indices.size()));
 }
 
 std::shared_ptr<Texture> loadTexture(RenderDeviceContext* pDeviceContext, char const* path)
@@ -547,8 +547,8 @@ bool loadScene(RenderDeviceContext* pDeviceContext, char const* path, Scene& sce
             }
         }
 
-        Mesh mesh{};
-        if (!createMesh(pDeviceContext, mesh, vertices.data(), static_cast<uint32_t>(vertices.size()), indices.data(), static_cast<uint32_t>(indices.size()))) {
+        std::shared_ptr<Mesh> mesh = createMesh(pDeviceContext, vertices.data(), static_cast<uint32_t>(vertices.size()), indices.data(), static_cast<uint32_t>(indices.size()));
+        if (mesh == nullptr) {
             return false;
         }
 
