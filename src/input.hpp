@@ -1,6 +1,6 @@
 #pragma once
 
-#include <SDL.h>
+#include <SDL_scancode.h>
 
 #include "math.hpp"
 

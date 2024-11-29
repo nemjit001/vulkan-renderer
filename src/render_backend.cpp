@@ -1,5 +1,7 @@
 #include "render_backend.hpp"
 
+#define VOLK_IMPLEMENTATION
+
 #include <cassert>
 #include <stdexcept>
 
@@ -31,7 +33,7 @@ RenderDeviceContext::RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurf
         VkDeviceQueueCreateInfo directQueueCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
         directQueueCreateInfo.flags = 0;
         directQueueCreateInfo.queueFamilyIndex = m_directQueueFamily;
-        directQueueCreateInfo.queueCount = SIZEOF_ARRAY(priorities);
+        directQueueCreateInfo.queueCount = static_cast<uint32_t>(std::size(priorities));
         directQueueCreateInfo.pQueuePriorities = priorities;
 
         VkPhysicalDeviceFeatures2 enabledFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
@@ -328,8 +330,7 @@ bool RenderDeviceContext::resizeSwapResources(uint32_t width, uint32_t height)
     return true;
 }
 
-bool RenderDeviceContext::createBuffer(
-    Buffer& buffer,
+std::shared_ptr<Buffer> RenderDeviceContext::createBuffer(
     size_t size,
     VkBufferUsageFlags usage,
     VkMemoryPropertyFlags properties,
@@ -338,44 +339,41 @@ bool RenderDeviceContext::createBuffer(
 {
     assert(size > 0);
 
-    buffer.device = device;
-    buffer.size = size;
-    buffer.mapped = false;
-    buffer.pData = nullptr;
-
     VkBufferCreateInfo bufferCreateInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     bufferCreateInfo.flags = 0;
     bufferCreateInfo.usage = usage;
     bufferCreateInfo.size = size;
     bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (VK_FAILED(vkCreateBuffer(device, &bufferCreateInfo, nullptr, &buffer.handle)))
+    VkBuffer buffer = VK_NULL_HANDLE;
+    if (VK_FAILED(vkCreateBuffer(device, &bufferCreateInfo, nullptr, &buffer)))
     {
-        return false;
+        return nullptr;
     }
 
     VkMemoryRequirements memRequirements{};
-    vkGetBufferMemoryRequirements(device, buffer.handle, &memRequirements);
+    vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
 
     VkMemoryAllocateInfo allocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
     allocateInfo.allocationSize = memRequirements.size;
     allocateInfo.memoryTypeIndex = getMemoryTypeIndex(memRequirements, properties);
 
-    if (VK_FAILED(vkAllocateMemory(device, &allocateInfo, nullptr, &buffer.memory)))
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (VK_FAILED(vkAllocateMemory(device, &allocateInfo, nullptr, &memory)))
     {
-        return false;
+        return nullptr;
     }
-    vkBindBufferMemory(device, buffer.handle, buffer.memory, 0);
+    vkBindBufferMemory(device, buffer, memory, 0);
 
+    std::shared_ptr<Buffer> pBuffer = std::make_shared<Buffer>(device, buffer, memory, size);
     if (createMapped) {
-        buffer.map();
+        pBuffer->map();
     }
 
-    return true;
+    return pBuffer;
 }
 
-bool RenderDeviceContext::createTexture(
-    Texture& texture,
+std::shared_ptr<Texture> RenderDeviceContext::createTexture(
     VkImageType imageType,
     VkFormat format,
     VkImageUsageFlags usage,
@@ -394,13 +392,6 @@ bool RenderDeviceContext::createTexture(
     assert(levels > 0);
     assert(layers > 0);
     assert(depth == 1 || layers == 1); //< layers and depth may not both be >1.
-
-    texture.device = device;
-    texture.format = format;
-    texture.width = width;
-    texture.height = height;
-    texture.depthOrLayers = depth == 1 ? layers : depth;
-    texture.levels = levels;
 
     VkImageFormatProperties formatProperties{};
     vkGetPhysicalDeviceImageFormatProperties(m_physicalDevice, format, imageType, tiling, usage, 0, &formatProperties);
@@ -427,25 +418,29 @@ bool RenderDeviceContext::createTexture(
     imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageCreateInfo.initialLayout = initialLayout;
 
-    if (VK_FAILED(vkCreateImage(device, &imageCreateInfo, nullptr, &texture.handle)))
+    VkImage image = VK_NULL_HANDLE;
+    if (VK_FAILED(vkCreateImage(device, &imageCreateInfo, nullptr, &image)))
     {
-        return false;
+        return nullptr;
     }
 
     VkMemoryRequirements memRequirements{};
-    vkGetImageMemoryRequirements(device, texture.handle, &memRequirements);
+    vkGetImageMemoryRequirements(device, image, &memRequirements);
 
     VkMemoryAllocateInfo allocateInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
     allocateInfo.allocationSize = memRequirements.size;
     allocateInfo.memoryTypeIndex = getMemoryTypeIndex(memRequirements, properties);
 
-    if (VK_FAILED(vkAllocateMemory(device, &allocateInfo, nullptr, &texture.memory)))
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    if (VK_FAILED(vkAllocateMemory(device, &allocateInfo, nullptr, &memory)))
     {
-        return false;
+        return nullptr;
     }
-    vkBindImageMemory(device, texture.handle, texture.memory, 0);
+    vkBindImageMemory(device, image, memory, 0);
 
-    return true;
+    uint32_t const depthOrLayers = depth == 1 ? layers : depth;
+    TextureSize const size = TextureSize{ width, height, depthOrLayers };
+    return std::make_shared<Texture>(device, image, memory, format, size, levels);
 }
 
 bool RenderDeviceContext::createCommandContext(CommandQueueType queue, CommandContext& commandContext)
@@ -724,7 +719,7 @@ namespace RenderBackend
         return instance;
     }
 
-    RenderDeviceContext* pickRenderDevice()
+    std::unique_ptr<RenderDeviceContext> pickRenderDevice()
     {
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
@@ -765,15 +760,6 @@ namespace RenderBackend
 
         int width = 0, height = 0;
         SDL_GetWindowSize(pAssociatedWindow, &width, &height);
-        return new RenderDeviceContext(physicalDevice, surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-    }
-
-    void destroyRenderDevice(RenderDeviceContext* pContext)
-    {
-        if (pContext == nullptr) {
-            return;
-        }
-
-        delete pContext;
+        return std::make_unique<RenderDeviceContext>(physicalDevice, surface, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
     }
 } // namespace RenderBackend

@@ -11,14 +11,14 @@ SceneRef Scene::addCamera(Camera const& camera)
     return ref;
 }
 
-SceneRef Scene::addMesh(Mesh const& mesh)
+SceneRef Scene::addMesh(std::shared_ptr<Mesh> mesh)
 {
     SceneRef ref = static_cast<SceneRef>(meshes.size());
     meshes.push_back(mesh);
     return ref;
 }
 
-SceneRef Scene::addTexture(Texture const& texture)
+SceneRef Scene::addTexture(std::shared_ptr<Texture> texture)
 {
     if (textures.size() + 1 > MaxTextures) {
         printf("Scene max textures reached\n");
@@ -60,14 +60,6 @@ void Scene::clear()
     nodes.name.clear();
     nodes.transform.clear();
     nodes.cameraRef.clear();
-
-    for (auto& texture : textures) {
-        texture.destroy();
-    }
-
-    for (auto& mesh : meshes) {
-        mesh.destroy();
-    }
 
     materials.clear();
     textures.clear();

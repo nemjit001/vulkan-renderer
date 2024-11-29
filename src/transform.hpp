@@ -9,10 +9,16 @@ struct Transform
     /// @return 
     glm::mat4 matrix() const;
 
+    /// @brief Local forward vector.
+    /// @return 
     glm::vec3 forward() const;
 
+    /// @brief Local right vector.
+    /// @return 
     glm::vec3 right() const;
 
+    /// @brief Local up vector.
+    /// @return 
     glm::vec3 up() const;
 
     glm::vec3 position = glm::vec3(0.0F);

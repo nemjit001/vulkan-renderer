@@ -2,16 +2,11 @@
 
 int main()
 {
-    if (!Engine::init())
-    {
-        Engine::shutdown();
-        return 1;
+    Engine engine;
+
+    while (engine.isRunning()) {
+        engine.update();
     }
 
-    while (Engine::isRunning()) {
-        Engine::update();
-    }
-
-    Engine::shutdown();
     return 0;
 }

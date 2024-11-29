@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -7,8 +8,8 @@
 #include "transform.hpp"
 
 struct Camera;
-struct Mesh;
-struct Texture;
+class Mesh;
+class Texture;
 
 using SceneRef = uint32_t;
 constexpr SceneRef RefUnused = ~0U;
@@ -29,9 +30,9 @@ class Scene
 public:
     SceneRef addCamera(Camera const& camera);
 
-    SceneRef addMesh(Mesh const& mesh);
+    SceneRef addMesh(std::shared_ptr<Mesh> mesh);
 
-    SceneRef addTexture(Texture const& texture);
+    SceneRef addTexture(std::shared_ptr<Texture> texture);
 
     SceneRef addMaterial(Material const& material);
 
@@ -53,8 +54,8 @@ public:
     std::vector<SceneRef> rootNodes{};
 
     std::vector<Camera> cameras{};
-    std::vector<Mesh> meshes{};
-    std::vector<Texture> textures{};
+    std::vector<std::shared_ptr<Mesh>> meshes{};
+    std::vector<std::shared_ptr<Texture>> textures{};
     std::vector<Material> materials{};
 
     struct

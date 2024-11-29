@@ -1,13 +1,14 @@
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #define VK_NO_PROTOTYPES
 #include <SDL.h>
 #include <vulkan/vulkan.h>
 
-struct Buffer;
-struct Texture;
+class Buffer;
+class Texture;
 
 /// @brief Command queue types available in a render device context.
 enum class CommandQueueType : uint8_t
@@ -35,12 +36,14 @@ struct CommandContext
 class RenderDeviceContext
 {
 public:
-	RenderDeviceContext() = default;
 	RenderDeviceContext(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t windowWidth, uint32_t windowHeight);
 	~RenderDeviceContext();
 
 	RenderDeviceContext(RenderDeviceContext const&) = delete;
 	RenderDeviceContext& operator=(RenderDeviceContext const&) = delete;
+
+	RenderDeviceContext(RenderDeviceContext&&) = delete;
+	RenderDeviceContext& operator=(RenderDeviceContext&&) = delete;
 
 	/// @brief Start a new frame, acquiring the next available backbuffer.
 	/// @return 
@@ -57,14 +60,12 @@ public:
 	bool resizeSwapResources(uint32_t width, uint32_t height);
 
 	/// @brief Create a GPU buffer.
-	/// @param buffer 
 	/// @param size 
 	/// @param usage 
 	/// @param memoryProperties 
 	/// @param createMapped 
-	/// @return 
-	bool createBuffer(
-		Buffer& buffer,
+	/// @return A GPU buffer, NULL on error.
+	std::shared_ptr<Buffer> createBuffer(
 		size_t size,
 		VkBufferUsageFlags usage,
 		VkMemoryPropertyFlags memoryProperties,
@@ -72,7 +73,6 @@ public:
 	);
 
 	/// @brief Create a GPU texture.
-	/// @param texture 
 	/// @param imageType 
 	/// @param format 
 	/// @param usage 
@@ -86,8 +86,7 @@ public:
 	/// @param tiling 
 	/// @param initialLayout 
 	/// @return 
-	bool createTexture(
-		Texture& texture,
+	std::shared_ptr<Texture> createTexture(
 		VkImageType imageType,
 		VkFormat format,
 		VkImageUsageFlags usage,
@@ -203,9 +202,5 @@ namespace RenderBackend
 
 	/// @brief Automatically pick a render device.
 	/// @return A pointer to a new render device, or NULL on failure.
-	RenderDeviceContext* pickRenderDevice();
-
-	/// @brief Destroy a render device context.
-	/// @param pContext 
-	void destroyRenderDevice(RenderDeviceContext* pContext);
+	std::unique_ptr<RenderDeviceContext> pickRenderDevice();
 } // namespace RenderBackend

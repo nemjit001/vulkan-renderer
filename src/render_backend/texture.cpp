@@ -4,7 +4,27 @@
 
 #include "utils.hpp"
 
-void Texture::destroy()
+Texture::Texture(
+    VkDevice device,
+    VkImage handle,
+    VkDeviceMemory memory,
+    VkFormat format,
+    TextureSize const& size,
+    uint32_t levels
+)
+    :
+    device(device),
+    handle(handle),
+    view(VK_NULL_HANDLE),
+    memory(memory),
+    format(format),
+    size(size),
+    levels(levels)
+{
+    //
+}
+
+Texture::~Texture()
 {
     if (device == VK_NULL_HANDLE) {
         return;
@@ -28,7 +48,7 @@ bool Texture::initDefaultView(VkImageViewType viewType, VkImageAspectFlags aspec
     viewCreateInfo.subresourceRange.baseMipLevel = 0;
     viewCreateInfo.subresourceRange.levelCount = levels;
     viewCreateInfo.subresourceRange.baseArrayLayer = 0;
-    viewCreateInfo.subresourceRange.layerCount = depthOrLayers;
+    viewCreateInfo.subresourceRange.layerCount = size.depthOrLayers;
     viewCreateInfo.subresourceRange.aspectMask = aspectMask;
 
     if (VK_FAILED(vkCreateImageView(device, &viewCreateInfo, nullptr, &view))) {
