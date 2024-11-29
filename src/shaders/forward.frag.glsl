@@ -41,16 +41,16 @@ layout(set = 2, binding = 0) uniform OBJECT_DATA
 
 void main()
 {
-	vec3 albedo = material.albedo;
+	vec4 albedo = vec4(material.albedo, 1.0);
 	vec3 specular = material.specular;
 	vec3 normal = vec3(0, 0, 1);
 
 	if (material.albedoMapIndex != ~0) {
-		albedo = linear(texture(textureMaps[material.albedoMapIndex], i_TexCoord).rgb);
+		albedo = linear(texture(textureMaps[material.albedoMapIndex], i_TexCoord));
 	}
 
 	if (material.specularMapIndex != ~0) {
-		specular = linear(texture(textureMaps[material.albedoMapIndex], i_TexCoord).rgb);
+		specular = texture(textureMaps[material.albedoMapIndex], i_TexCoord).rgb;
 	}
 
 	if (material.normalMapIndex != ~0) {
@@ -60,5 +60,5 @@ void main()
 
 	// TODO(nemjit001): Implment shading model
 	vec3 N = normalize(i_TBN * normal);
-	f_FragColor = vec4(albedo, 1.0);
+	f_FragColor = albedo;
 }

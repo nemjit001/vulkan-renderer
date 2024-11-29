@@ -2,12 +2,12 @@
 #define GAMMA		2.2
 #define INV_GAMMA	1.0 / GAMMA
 
-vec3 gamma(vec3 color)
+vec4 gamma(vec4 color)
 {
-	return pow(color, vec3(INV_GAMMA));
+	return vec4(pow(color.rgb, vec3(INV_GAMMA)), color.a);
 }
 
-vec3 linear(vec3 color)
+vec4 linear(vec4 color)
 {
-	return pow(color, vec3(GAMMA));
+	return vec4(pow(color.rgb, vec3(GAMMA)), color.a);
 }
