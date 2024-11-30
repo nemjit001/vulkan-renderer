@@ -30,6 +30,13 @@ SceneRef Scene::addTexture(std::shared_ptr<Texture> texture)
     return ref;
 }
 
+SceneRef Scene::addLight(Light const& light)
+{
+    SceneRef ref = static_cast<SceneRef>(lights.size());
+    lights.push_back(light);
+    return ref;
+}
+
 SceneRef Scene::addMaterial(Material const& material)
 {
     SceneRef ref = static_cast<SceneRef>(materials.size());
@@ -62,6 +69,7 @@ void Scene::clear()
     nodes.cameraRef.clear();
 
     materials.clear();
+    lights.clear();
     textures.clear();
     meshes.clear();
 

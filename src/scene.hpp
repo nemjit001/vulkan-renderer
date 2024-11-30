@@ -14,6 +14,20 @@ class Texture;
 using SceneRef = uint32_t;
 constexpr SceneRef RefUnused = ~0U;
 
+enum class LightType
+{
+    Undefined = 0,
+    Directional = 1,
+    Point = 2,
+};
+
+struct Light
+{
+    LightType type;
+    bool shadowCaster;
+    glm::vec3 color;
+};
+
 /// @brief Material data, contains defaults and references to scene textures.
 struct Material
 {
@@ -33,6 +47,8 @@ public:
     SceneRef addMesh(std::shared_ptr<Mesh> mesh);
 
     SceneRef addTexture(std::shared_ptr<Texture> texture);
+
+    SceneRef addLight(Light const& light);
 
     SceneRef addMaterial(Material const& material);
 
@@ -56,6 +72,7 @@ public:
     std::vector<Camera> cameras{};
     std::vector<std::shared_ptr<Mesh>> meshes{};
     std::vector<std::shared_ptr<Texture>> textures{};
+    std::vector<Light> lights{};
     std::vector<Material> materials{};
 
     struct
