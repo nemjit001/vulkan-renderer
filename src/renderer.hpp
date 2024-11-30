@@ -59,6 +59,17 @@ protected:
 		alignas(16) glm::mat4 matrix;
 	};
 
+	/// @brief Shader storage light buffer entry.
+	/// Expects shadow maps to be bound in sampler arrays
+	struct SSBOLightEntry
+	{
+		alignas(4) uint32_t type;
+		alignas(16) glm::vec3 positionOrDirection;
+		alignas(16) glm::mat4 lightSpaceTransform;
+		alignas(16) glm::vec3 color;
+		alignas(4) uint32_t shadowMapIndex;
+	};
+
 	/// @brief Uniform material parameters, aligned for use on the GPU.
 	/// Expects textures to be bound in sampler arrays.
 	struct alignas(64) UniformMaterialData
@@ -75,6 +86,14 @@ protected:
 	{
 		alignas(16) glm::mat4 model;
 		alignas(16) glm::mat4 normal;
+	};
+
+	/// @brief Mesh draw in renderer, associates a mesh with an object index and material
+	struct MeshDraw
+	{
+		uint32_t material;
+		uint32_t mesh;
+		uint32_t objectIndex;
 	};
 
 	//-- State tracking --//
@@ -104,7 +123,8 @@ protected:
 	VkPipeline m_forwardOpaquePipeline = VK_NULL_HANDLE;
 
 	//-- Uniform buffers --//
-	std::shared_ptr<Buffer> m_sceneDataBuffer = nullptr; //< contains camera data.
+	std::shared_ptr<Buffer> m_cameraDataBuffer = nullptr; //< contains camera data.
+	std::shared_ptr<Buffer> m_lightBuffer = nullptr; //< contains all lights in the scene.
 	std::shared_ptr<Buffer> m_materialDataBuffer = nullptr; //< contains all materials in the scene.
 	std::shared_ptr<Buffer> m_objectDataBuffer = nullptr; //< contains a node's world transforms (model + normal matrix).
 	std::vector<glm::mat4> m_objectTransforms{}; //< contains cached world space transforms
@@ -120,5 +140,5 @@ protected:
 	std::vector<VkDescriptorSet> m_objectSets{};
 
 	//-- Optimized draw data --//
-	std::unordered_map<uint32_t, std::vector<uint32_t>> m_drawData; //< Material:Node[] mapping
+	std::unordered_map<uint32_t, std::vector<MeshDraw>> m_drawData;
 };

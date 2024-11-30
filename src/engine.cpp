@@ -89,6 +89,16 @@ Engine::Engine()
     scene.nodes.cameraRef[cameraNode] = cameraRef;
     scene.activeCamera = cameraNode;
 
+    // Set up some lights
+    Light sunLight{};
+    sunLight.type = LightType::Directional;
+    sunLight.color = glm::vec3(1.0F, 1.0F, 1.0F);
+    sunLight.shadowCaster = false;
+    SceneRef sunLightRef = scene.addLight(sunLight);
+    SceneRef sunLightNode = scene.createChildNode(cameraNode, "Sun Light");
+    scene.nodes.transform[sunLightNode].rotation = glm::rotate(scene.nodes.transform[sunLightNode].rotation, glm::radians(-45.0F), RIGHT);
+    scene.nodes.lightRef[sunLightNode] = sunLightRef;
+
     // Load scene files from disk
     if (!loadScene(m_pDeviceContext.get(), "data/assets/Sponza/sponza.obj", scene))
     {

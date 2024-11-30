@@ -21,7 +21,7 @@ function(target_compile_shaders TARGET_NAME TARGET_SHADER_SOURCES TARGET_SHADER_
 		# Compile shaders to runtime output directory
 		add_custom_command(OUTPUT ${SHADER_OUTPUT_FILE}
 			COMMAND ${GLSL_COMPILER} ${SHADER_SOURCE} -o "${SHADER_OUTPUT_FILE}"
-			DEPENDS ${SHADER_SOURCE}
+			DEPENDS ${SHADER_SOURCE} ${TARGET_SHADER_HEADERS}
 			COMMENT "Compiling ${SHADER_SOURCE} -> ${SHADER_OUTPUT_FILE}"
 		)
 
@@ -36,7 +36,7 @@ function(target_compile_shaders TARGET_NAME TARGET_SHADER_SOURCES TARGET_SHADER_
 	endforeach()
 
 	add_custom_target(${TARGET_NAME}_CompileShaders
-		DEPENDS "${${TARGET_NAME}_SHADER_SOURCES}"
+		DEPENDS "${${TARGET_NAME}_SHADER_SOURCES}" ${TARGET_SHADER_HEADERS}
 		COMMENT "${TARGET_NAME}: Compiling shaders"
 	)
 

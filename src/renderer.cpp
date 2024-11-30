@@ -203,10 +203,24 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			textureArrayBinding.binding = 1;
 			textureArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			textureArrayBinding.descriptorCount = Scene::MaxTextures;
-			textureArrayBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+			textureArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 			textureArrayBinding.pImmutableSamplers = nullptr;
 
-			VkDescriptorSetLayoutBinding sceneDataBindings[] = { cameraDataBinding, textureArrayBinding, };
+			VkDescriptorSetLayoutBinding shadowMapArrayBinding{};
+			shadowMapArrayBinding.binding = 2;
+			shadowMapArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			shadowMapArrayBinding.descriptorCount = Scene::MaxShadowCasters;
+			shadowMapArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+			shadowMapArrayBinding.pImmutableSamplers = nullptr;
+
+			VkDescriptorSetLayoutBinding lightBufferBinding{};
+			lightBufferBinding.binding = 3;
+			lightBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			lightBufferBinding.descriptorCount = 1;
+			lightBufferBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+			lightBufferBinding.pImmutableSamplers = nullptr;
+
+			VkDescriptorSetLayoutBinding sceneDataBindings[] = { cameraDataBinding, textureArrayBinding, shadowMapArrayBinding, lightBufferBinding, };
 			VkDescriptorSetLayoutCreateInfo sceneDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 			sceneDataSetLayout.flags = 0;
 			sceneDataSetLayout.bindingCount = static_cast<uint32_t>(std::size(sceneDataBindings));
@@ -434,13 +448,15 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 	// Create uniform buffers
 	{
 		size_t sceneDataBufferSize = sizeof(UniformCameraData);
+		size_t lightDataBufferSize = sizeof(SSBOLightEntry);
 		size_t materialBufferSize = sizeof(UniformMaterialData);
 		size_t objectBufferSize = sizeof(UniformObjectData);
 
-		m_sceneDataBuffer = m_pDeviceContext->createBuffer(sceneDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		m_cameraDataBuffer = m_pDeviceContext->createBuffer(sceneDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		m_lightBuffer = m_pDeviceContext->createBuffer(lightDataBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 		m_materialDataBuffer = m_pDeviceContext->createBuffer(materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 		m_objectDataBuffer = m_pDeviceContext->createBuffer(objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-		if (m_sceneDataBuffer == nullptr || m_materialDataBuffer == nullptr || m_objectDataBuffer == nullptr) {
+		if (m_cameraDataBuffer == nullptr || m_lightBuffer == nullptr || m_materialDataBuffer == nullptr || m_objectDataBuffer == nullptr) {
 			throw std::runtime_error("Forward Renderer uniform buffer create failed");
 		}
 	}
@@ -574,10 +590,103 @@ bool ForwardRenderer::onResize(uint32_t width, uint32_t height)
 
 void ForwardRenderer::update(Scene const& scene)
 {
+	// Gather scene data buffer entries
+	std::vector<SSBOLightEntry> lightBuffer;
+	std::vector<UniformMaterialData> materialBuffer;
+	std::vector<UniformObjectData> objectBuffer;
+	std::vector<MeshDraw> draws;
+	lightBuffer.reserve(scene.nodes.count);
+	materialBuffer.reserve(scene.materials.size());
+	objectBuffer.reserve(scene.nodes.count);
+	draws.reserve(scene.nodes.count);
+
+	// Calculate world space transforms for all nodes
+	m_objectTransforms.resize(scene.nodes.count);
+	for (auto const& root : scene.rootNodes) {
+		SceneHelpers::calcWorldSpaceTransforms(scene, glm::identity<glm::mat4>(), m_objectTransforms, root);
+	}
+
+	// Gather material data
+	for (auto const& material : scene.materials)
+	{
+		UniformMaterialData const materialData{
+			material.defaultAlbedo,
+			material.defaultSpecular,
+			material.albedoTexture,
+			material.specularTexture,
+			material.normalTexture
+		};
+
+		materialBuffer.push_back(materialData);
+	}
+
+	// Gather lights, objects, draws
+	for (uint32_t i = 0; i < scene.nodes.count; i++)
+	{
+		if (scene.nodes.lightRef[i] != RefUnused)
+		{
+			Light const& light = scene.lights[scene.nodes.lightRef[i]];
+			SSBOLightEntry lightEntry{};
+			lightEntry.type = static_cast<uint32_t>(light.type);
+			lightEntry.positionOrDirection = glm::vec3(0);
+			lightEntry.lightSpaceTransform = m_objectTransforms[i]; // FIXME(nemjit001): mul w/ light view matrix
+			lightEntry.color = light.color;
+			lightEntry.shadowMapIndex = RefUnused; // TODO(nemjit001): If shadow caster, find map in shadowmap cache
+
+			switch (light.type)
+			{
+			case LightType::Undefined:
+				break;
+			case LightType::Directional:
+				lightEntry.positionOrDirection = glm::normalize(scene.nodes.transform[i].forward());
+				break;
+			case LightType::Point:
+				lightEntry.positionOrDirection = scene.nodes.transform[i].position;
+				break;
+			default:
+				break;
+			}
+
+			lightBuffer.push_back(lightEntry);
+		}
+
+		if (scene.nodes.materialRef[i] != RefUnused
+			&& scene.nodes.meshRef[i] != RefUnused)
+		{
+			glm::mat4 const model = m_objectTransforms[i];
+			glm::mat4 const normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(model))));
+
+			UniformObjectData const objectData{
+				model,
+				normal,
+			};
+
+			MeshDraw const draw{
+				scene.nodes.materialRef[i],
+				scene.nodes.meshRef[i],
+				static_cast<uint32_t>(objectBuffer.size()),
+			};
+
+			objectBuffer.push_back(objectData);
+			draws.push_back(draw);
+		}
+	}
+
 	// Check uniform buffer sizes & recreate buffers if needed
-	size_t const materialBufferSize = scene.materials.size() * sizeof(UniformMaterialData);
-	size_t const objectBufferSize = scene.nodes.count * sizeof(UniformObjectData);
+	size_t const lightBufferSize = lightBuffer.size() * sizeof(SSBOLightEntry);
+	size_t const materialBufferSize = materialBuffer.size() * sizeof(UniformMaterialData);
+	size_t const objectBufferSize = objectBuffer.size() * sizeof(UniformObjectData);
 	
+	if (lightBufferSize > m_lightBuffer->size())
+	{
+		m_lightBuffer = m_pDeviceContext->createBuffer(lightBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		if (m_lightBuffer == nullptr) {
+			throw std::runtime_error("Forward Renderer update uniform light buffer resize failed\n");
+		}
+
+		printf("Forward Renderer light storage buffer resized: %zu bytes\n", m_lightBuffer->size());
+	}
+
 	if (materialBufferSize > m_materialDataBuffer->size())
 	{
 		m_materialDataBuffer = m_pDeviceContext->createBuffer(materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -585,7 +694,7 @@ void ForwardRenderer::update(Scene const& scene)
 			throw std::runtime_error("Forward Renderer update uniform material buffer resize failed\n");
 		}
 
-		printf("Forward Renderer material uniform resized: %zu bytes\n", m_materialDataBuffer->size());
+		printf("Forward Renderer material uniform buffer resized: %zu bytes\n", m_materialDataBuffer->size());
 	}
 
 	if (objectBufferSize > m_objectDataBuffer->size())
@@ -595,10 +704,10 @@ void ForwardRenderer::update(Scene const& scene)
 			throw std::runtime_error("Forward Renderer update uniform object buffer resize failed\n");
 		}
 
-		printf("Forward Renderer object uniform resized: %zu bytes\n", m_objectDataBuffer->size());
+		printf("Forward Renderer object uniform buffer resized: %zu bytes\n", m_objectDataBuffer->size());
 	}
 
-	// Upload uniform camera data
+	// Upload shader data
 	Transform const& camTransform = scene.nodes.transform[scene.activeCamera];
 	Camera const& camera = scene.cameras[scene.nodes.cameraRef[scene.activeCamera]];
 	UniformCameraData const cameraData{
@@ -606,70 +715,43 @@ void ForwardRenderer::update(Scene const& scene)
 		camera.matrix() * glm::lookAt(camTransform.position + camTransform.forward(), camTransform.position, UP),
 	};
 
-	m_sceneDataBuffer->map();
-	memcpy(m_sceneDataBuffer->data(), &cameraData, sizeof(UniformCameraData));
-	m_sceneDataBuffer->unmap();
+	m_cameraDataBuffer->map();
+	memcpy(m_cameraDataBuffer->data(), &cameraData, sizeof(UniformCameraData));
+	m_cameraDataBuffer->unmap();
 
-	// Upload uniform material data if it exists
-	if (scene.materials.size() > 0)
+	if (!lightBuffer.empty())
+	{
+		m_lightBuffer->map();
+		memcpy(m_lightBuffer->data(), lightBuffer.data(), m_lightBuffer->size());
+		m_lightBuffer->unmap();
+	}
+
+	if (!materialBuffer.empty())
 	{
 		m_materialDataBuffer->map();
-		UniformMaterialData* pMaterialData = reinterpret_cast<UniformMaterialData*>(m_materialDataBuffer->data());
-		size_t materialIdx = 0;
-		for (auto const& material : scene.materials)
-		{
-			UniformMaterialData const uniformData{
-				material.defaultAlbedo,
-				material.defaultSpecular,
-				material.albedoTexture,
-				material.specularTexture,
-				material.normalTexture
-			};
-
-
-			pMaterialData[materialIdx] = uniformData;
-			materialIdx++;
-		}
-
+		memcpy(m_materialDataBuffer->data(), materialBuffer.data(), m_materialDataBuffer->size());
 		m_materialDataBuffer->unmap();
 	}
 
-	// Upload uniform object data if it exists
-	if (scene.nodes.count > 0)
+	if (!objectBuffer.empty())
 	{
-		m_objectTransforms.resize(scene.nodes.count);
-		for (auto const& root : scene.rootNodes) {
-			SceneHelpers::calcWorldSpaceTransforms(scene, glm::identity<glm::mat4>(), m_objectTransforms, root);
-		}
-
 		m_objectDataBuffer->map();
-		UniformObjectData* pObjectData = reinterpret_cast<UniformObjectData*>(m_objectDataBuffer->data());
-		size_t objectIdx = 0;
-		for (auto const& model : m_objectTransforms)
-		{
-			glm::mat4 const normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(model))));
-			UniformObjectData const uniformData{
-				model,
-				normal
-			};
-
-			pObjectData[objectIdx] = uniformData;
-			objectIdx++;
-		}
-
+		memcpy(m_objectDataBuffer->data(), objectBuffer.data(), m_objectDataBuffer->size());
 		m_objectDataBuffer->unmap();
 	}
 
 	// Size descriptor set arrays for this frame & recreate descriptor pool
-	m_materialSets.resize(scene.materials.size());
-	m_objectSets.resize(scene.nodes.count);
+	m_materialSets.resize(materialBuffer.size());
+	m_objectSets.resize(objectBuffer.size());
 
+	// required = scene + materials[] + objects[]
 	uint32_t requiredDescriptorSets = static_cast<uint32_t>(1 + m_materialSets.size() + m_objectSets.size());
 	if (requiredDescriptorSets > m_maxDescriptorSets) {
 		m_maxDescriptorSets = requiredDescriptorSets;
 
 		VkDescriptorPoolSize poolSizes[] = {
 			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * m_maxDescriptorSets },
+			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 * m_maxDescriptorSets },
 			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 * m_maxDescriptorSets },
 		};
 
@@ -727,15 +809,17 @@ void ForwardRenderer::update(Scene const& scene)
 	}
 
 	// Update all descriptor sets in frame (scene data, texture array, material data, object data)
+	// 4 descriptors for scene + materials + objects
+	uint32_t const descriptorCount = 4 + materialBuffer.size() + objectBuffer.size();
 	std::vector<VkDescriptorImageInfo> imageInfos{};
 	std::vector<VkDescriptorBufferInfo> bufferInfos{};
 	std::vector<VkWriteDescriptorSet> descriptorWrites{};
-	imageInfos.reserve(scene.textures.size());
-	bufferInfos.reserve(2 + scene.materials.size() + scene.nodes.count);
-	descriptorWrites.reserve(2 + scene.materials.size() + scene.nodes.count);
+	imageInfos.reserve(descriptorCount);
+	bufferInfos.reserve(descriptorCount);
+	descriptorWrites.reserve(descriptorCount);
 
 	VkDescriptorBufferInfo cameraDataBufferInfo{};
-	cameraDataBufferInfo.buffer = m_sceneDataBuffer->handle();
+	cameraDataBufferInfo.buffer = m_cameraDataBuffer->handle();
 	cameraDataBufferInfo.offset = 0;
 	cameraDataBufferInfo.range = sizeof(UniformCameraData);
 	bufferInfos.emplace_back(cameraDataBufferInfo);
@@ -767,7 +851,24 @@ void ForwardRenderer::update(Scene const& scene)
 		descriptorWrites.emplace_back(textureWrite);
 	}
 
-	for (size_t materialIdx = 0; materialIdx < scene.materials.size(); materialIdx++)
+	// TODO(nemjit001): Write shadow map texture descriptors
+
+	VkDescriptorBufferInfo lightBufferInfo{};
+	lightBufferInfo.buffer = m_lightBuffer->handle();
+	lightBufferInfo.offset = 0;
+	lightBufferInfo.range = m_lightBuffer->size();
+	bufferInfos.emplace_back(lightBufferInfo);
+
+	VkWriteDescriptorSet lightBufferWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	lightBufferWrite.dstSet = m_sceneSet;
+	lightBufferWrite.dstBinding = 3;
+	lightBufferWrite.dstArrayElement = 0;
+	lightBufferWrite.descriptorCount = 1;
+	lightBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	lightBufferWrite.pBufferInfo = &bufferInfos.back();
+	descriptorWrites.emplace_back(lightBufferWrite);
+
+	for (size_t materialIdx = 0; materialIdx < materialBuffer.size(); materialIdx++)
 	{
 		VkDescriptorBufferInfo materialDataBufferInfo{};
 		materialDataBufferInfo.buffer = m_materialDataBuffer->handle();
@@ -785,16 +886,16 @@ void ForwardRenderer::update(Scene const& scene)
 		descriptorWrites.emplace_back(materialDataWrite);
 	}
 
-	for (size_t nodeIdx = 0; nodeIdx < scene.nodes.count; nodeIdx++)
+	for (size_t objectIdx = 0; objectIdx < objectBuffer.size(); objectIdx++)
 	{
 		VkDescriptorBufferInfo objectDataBufferInfo{};
 		objectDataBufferInfo.buffer = m_objectDataBuffer->handle();
-		objectDataBufferInfo.offset = nodeIdx * sizeof(UniformObjectData);
+		objectDataBufferInfo.offset = objectIdx * sizeof(UniformObjectData);
 		objectDataBufferInfo.range = sizeof(UniformObjectData);
 		bufferInfos.emplace_back(objectDataBufferInfo);
 
 		VkWriteDescriptorSet objectDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		objectDataWrite.dstSet = m_objectSets[nodeIdx];
+		objectDataWrite.dstSet = m_objectSets[objectIdx];
 		objectDataWrite.dstBinding = 0;
 		objectDataWrite.dstArrayElement = 0;
 		objectDataWrite.descriptorCount = 1;
@@ -804,17 +905,10 @@ void ForwardRenderer::update(Scene const& scene)
 	}
 	vkUpdateDescriptorSets(m_pDeviceContext->device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 
-	// Sort object draws by material to reduce state changes in draw
+	// Sort mesh draws by material to reduce state changes in draw loop
 	m_drawData.clear();
-	for (uint32_t nodeIdx = 0; nodeIdx < scene.nodes.count; nodeIdx++)
-	{
-		SceneRef const meshRef = scene.nodes.meshRef[nodeIdx];
-		SceneRef const materialRef = scene.nodes.materialRef[nodeIdx];
-		if (meshRef == RefUnused || materialRef == RefUnused) {
-			continue;
-		}
-
-		m_drawData[materialRef].emplace_back(nodeIdx);
+	for (auto const& draw : draws) {
+		m_drawData[draw.material].emplace_back(draw);
 	}
 }
 
@@ -867,18 +961,15 @@ void ForwardRenderer::render(Scene const& scene)
 				0, nullptr
 			);
 
-			for (uint32_t nodeIdx : kvp.second)
+			for (MeshDraw const& draw : kvp.second)
 			{
 				vkCmdBindDescriptorSets( // Bind object data set
 					m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_forwardPipelineLayout,
-					2, 1, &m_objectSets[nodeIdx],
+					2, 1, &m_objectSets[draw.objectIndex],
 					0, nullptr
 				);
 
-				SceneRef const meshRef = scene.nodes.meshRef[nodeIdx];
-				assert(meshRef != RefUnused);
-
-				std::shared_ptr<Mesh> const& mesh = scene.meshes[meshRef];
+				std::shared_ptr<Mesh> const& mesh = scene.meshes[draw.mesh];
 				VkBuffer vertexBuffers[] = { mesh->vertexBuffer->handle(), };
 				VkDeviceSize const offsets[] = { 0, };
 				vkCmdBindVertexBuffers(m_frameCommands.handle, 0, static_cast<uint32_t>(std::size(vertexBuffers)), vertexBuffers, offsets);

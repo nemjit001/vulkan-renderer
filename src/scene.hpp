@@ -65,6 +65,7 @@ private:
 
 public:
     static constexpr uint32_t MaxTextures = 1024; //< Required for descriptor indexing in renderer
+    static constexpr uint32_t MaxShadowCasters = 64; //< Required for descriptor indexing in renderer
 
     SceneRef activeCamera = RefUnused; //< Reference to a scene node containing a camera reference
     std::vector<SceneRef> rootNodes{};
@@ -82,6 +83,7 @@ public:
         std::vector<Transform> transform{};
         std::vector<SceneRef> cameraRef{};
         std::vector<SceneRef> meshRef{};
+        std::vector<SceneRef> lightRef{};
         std::vector<SceneRef> materialRef{};
         std::vector<std::vector<SceneRef>> children{};
     } nodes;

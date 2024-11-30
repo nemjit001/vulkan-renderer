@@ -92,6 +92,7 @@ SceneRef Scene::createNode(std::string const& name, Transform const& transform)
     nodes.transform.push_back(transform);
     nodes.cameraRef.push_back(RefUnused);
     nodes.meshRef.push_back(RefUnused);
+    nodes.lightRef.push_back(RefUnused);
     nodes.materialRef.push_back(RefUnused);
     nodes.children.emplace_back();
     nodes.count++;
@@ -101,6 +102,7 @@ SceneRef Scene::createNode(std::string const& name, Transform const& transform)
         && nodes.count == nodes.transform.size()
         && nodes.count == nodes.cameraRef.size()
         && nodes.count == nodes.meshRef.size()
+        && nodes.count == nodes.lightRef.size()
         && nodes.count == nodes.materialRef.size()
         && nodes.count == nodes.children.size()
     );

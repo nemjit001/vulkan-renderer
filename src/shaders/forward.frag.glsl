@@ -53,7 +53,7 @@ void main()
 
 		// Calculate L vector
 		if (light.type == LIGHT_TYPE_DIRECTIONAL) {
-			L = light.positionOrDirection;
+			L = normalize(-light.positionOrDirection);
 		}
 		else if (light.type == LIGHT_TYPE_POINT) {
 			vec3 lightVec = light.positionOrDirection - fragPosition;

@@ -17,13 +17,11 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 	- [X] Camera controller
 - [X] Scene loading (Assimp)
 	- [ ] Camera loading
-- [ ] Lights
-	- [ ] Sun light (directional)
-	- [ ] Multiple point lights
+- [X] Lights
+	- [X] Sun light (directional)
+	- [X] Multiple point lights
 - [ ] Render pipeline
 	- [ ] Shadow mapping pass
-		- [ ] Sun only, cascaded
-		- [ ] Point lights
 	- [ ] Depth prepass
 	- [ ] Forward opaque pass
 	- [ ] Transparency pass
