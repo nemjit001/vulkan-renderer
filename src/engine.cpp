@@ -13,6 +13,7 @@
 #include "assets.hpp"
 #include "camera.hpp"
 #include "gui.hpp"
+#include "light.hpp"
 #include "math.hpp"
 #include "mesh.hpp"
 #include "renderer.hpp"
@@ -77,27 +78,14 @@ Engine::Engine()
         return;
     }
 
-    // Set up default scene camera
-    Camera camera{};
-    camera.type = CameraType::Perspective;
-    camera.perspective.FOVy = 60.0F;
-    camera.perspective.aspectRatio = static_cast<float>(m_framebufferWidth) / static_cast<float>(m_framebufferHeight);
-    camera.perspective.zNear = 1.0F;
-    camera.perspective.zFar = 5000.0F;
+    // Set up default scene camera & sun
+    scene.sun.zenith = 45.0F;
+
+    Camera camera = Camera::createPerspective(60.0F, static_cast<float>(m_framebufferWidth) / static_cast<float>(m_framebufferHeight), 1.0F, 5'000.0F);
     SceneRef cameraRef = scene.addCamera(camera);
     SceneRef cameraNode = scene.createRootNode("Camera", Transform{ { 0.0F, 50.0F, -5.0F } });
     scene.nodes.cameraRef[cameraNode] = cameraRef;
     scene.activeCamera = cameraNode;
-
-    // Set up some lights
-    Light sunLight{};
-    sunLight.type = LightType::Directional;
-    sunLight.color = glm::vec3(1.0F, 1.0F, 1.0F);
-    sunLight.shadowCaster = false;
-    SceneRef sunLightRef = scene.addLight(sunLight);
-    SceneRef sunLightNode = scene.createChildNode(cameraNode, "Sun Light");
-    scene.nodes.transform[sunLightNode].rotation = glm::rotate(scene.nodes.transform[sunLightNode].rotation, glm::radians(-45.0F), RIGHT);
-    scene.nodes.lightRef[sunLightNode] = sunLightRef;
 
     // Load scene files from disk
     if (!loadScene(m_pDeviceContext.get(), "data/assets/Sponza/sponza.obj", scene))
@@ -233,12 +221,17 @@ void Engine::update()
         ImGui::Text("- CPU update time: %10.2f ms", avgCPUUpdateTime.getAverage());
         ImGui::Text("- CPU render time: %10.2f ms", avgCPURenderTime.getAverage());
 
+        ImGui::SeparatorText("Sun");
+        ImGui::DragFloat("Azimuth", &scene.sun.azimuth, 1.0F, 0.0F, 360.0F);
+        ImGui::DragFloat("Zenith", &scene.sun.zenith, 1.0F, 0.0F, 90.0F);
+        ImGui::ColorPicker3("Color", &scene.sun.color[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_DisplayRGB);
+
         ImGui::SeparatorText("Camera");
         ImGui::Text("Position: %8.2f %8.2f %8.2f", camPosition.x, camPosition.y, camPosition.z);
         ImGui::Text("Forward:  %8.2f %8.2f %8.2f", camForward.x, camForward.y, camForward.z);
         ImGui::Text("Right:    %8.2f %8.2f %8.2f", camRight.x, camRight.y, camRight.z);
         ImGui::Text("Up:       %8.2f %8.2f %8.2f", camUp.x, camUp.y, camUp.z);
-        ImGui::DragFloat("FOV Y", &activeCamera.perspective.FOVy);
+        ImGui::DragFloat("FOV Y", &activeCamera.perspective.FOVy, 1.0F, 20.0F, 120.0F);
         ImGui::DragFloat("Z Near", &activeCamera.perspective.zNear, 1.0F, 0.0F, 1000.0F);
         ImGui::DragFloat("Z Far", &activeCamera.perspective.zFar, 1.0F, 0.0F, 10000.0F);
 

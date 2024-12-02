@@ -59,15 +59,20 @@ protected:
 		alignas(16) glm::mat4 matrix;
 	};
 
+	/// @brief Uniform sunlight parameters, aligned for use on the GPU.
+	struct UniformSunLightData
+	{
+		alignas(16) glm::vec3 direction;
+		alignas(16) glm::vec3 color;
+		alignas(16) glm::mat4 lightSpaceTransform;
+	};
+
 	/// @brief Shader storage light buffer entry.
-	/// Expects shadow maps to be bound in sampler arrays
 	struct SSBOLightEntry
 	{
 		alignas(4) uint32_t type;
-		alignas(16) glm::vec3 positionOrDirection;
-		alignas(16) glm::mat4 lightSpaceTransform;
 		alignas(16) glm::vec3 color;
-		alignas(4) uint32_t shadowMapIndex;
+		alignas(16) glm::vec3 positionOrDirection;
 	};
 
 	/// @brief Uniform material parameters, aligned for use on the GPU.
@@ -124,6 +129,7 @@ protected:
 
 	//-- Uniform buffers --//
 	std::shared_ptr<Buffer> m_cameraDataBuffer = nullptr; //< contains camera data.
+	std::shared_ptr<Buffer> m_sunLightDataBuffer = nullptr; //< contains sun light data.
 	std::shared_ptr<Buffer> m_lightBuffer = nullptr; //< contains all lights in the scene.
 	std::shared_ptr<Buffer> m_materialDataBuffer = nullptr; //< contains all materials in the scene.
 	std::shared_ptr<Buffer> m_objectDataBuffer = nullptr; //< contains a node's world transforms (model + normal matrix).

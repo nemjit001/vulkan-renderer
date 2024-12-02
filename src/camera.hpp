@@ -41,6 +41,10 @@ enum class CameraType : uint8_t
 /// @brief Camera tagged union, provides Virtual Camera interface.
 struct Camera
 {
+    static Camera createPerspective(float FOVy, float aspect, float zNear, float zFar);
+
+    static Camera createOrtho(float xMag, float yMag, float zNear, float zFar);
+
     /// @brief Calculate the projection matrix for this camera.
     /// @return 
     glm::mat4 matrix() const;

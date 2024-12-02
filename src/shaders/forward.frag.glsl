@@ -48,28 +48,29 @@ void main()
 	{
 		Light light = lights[lightIdx];
 		vec3 lightColor = light.color;
-		float shadowStrength = 0.0;
 		vec3 L = vec3(0);
 
 		// Calculate L vector
-		if (light.type == LIGHT_TYPE_DIRECTIONAL) {
+		if (light.type == LIGHT_TYPE_DIRECTIONAL)
+		{
 			L = normalize(-light.positionOrDirection);
 		}
-		else if (light.type == LIGHT_TYPE_POINT) {
+		else if (light.type == LIGHT_TYPE_POINT)
+		{
 			vec3 lightVec = light.positionOrDirection - fragPosition;
 			lightColor /= dot(lightVec, lightVec); //< divide color strength by squared distance to light
 			L = normalize(lightVec);
 		}
 
-		// Sample shadow maps if they are available
-		if (light.type == LIGHT_TYPE_DIRECTIONAL && light.shadowMapIndex != PARAMETER_UNUSED) {
-			vec4 shadowFragPos = light.lightSpaceTransform * i_Position;
-			float shadowBias = max(0.05 * (1.0 - dot(N, L)), 0.005); //< Shadow bias in range [0.005, 005]
-			shadowStrength = shadowStrengthDirectionalLight(shadowFragPos, shadowMaps[light.shadowMapIndex], shadowBias);
-		}
-
+		// Update output color.
+		float shadowStrength = 0.0;
 		outColor += modelBlinnPhong(albedo.rgb, specular, lightColor, shadowStrength, N, L, V);
 	}
 
+	// Gather sun light influence
+	float sunShadowStrength = 0.0; // TODO(nemjit001): use shadow map for sun light in scene.
+	outColor += modelBlinnPhong(albedo.rgb, specular, sun.color, sunShadowStrength, N, normalize(-sun.direction), V);
+
+	// Output color with preserved alpha
 	f_FragColor = vec4(outColor, albedo.a);
 }

@@ -21,3 +21,18 @@ glm::vec3 Transform::up() const
 {
     return glm::normalize(glm::vec3(glm::inverse(matrix())[1]));
 }
+
+static glm::vec3 forward(glm::mat4 const& transform)
+{
+    return glm::normalize(glm::vec3(glm::inverse(transform)[2]));
+}
+
+static glm::vec3 right(glm::mat4 const& transform)
+{
+    return glm::normalize(glm::vec3(glm::inverse(transform)[0]));
+}
+
+static glm::vec3 up(glm::mat4 const& transform)
+{
+    return glm::normalize(glm::vec3(glm::inverse(transform)[1]));
+}

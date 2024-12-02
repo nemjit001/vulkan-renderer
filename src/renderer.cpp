@@ -8,6 +8,7 @@
 
 #include "assets.hpp"
 #include "camera.hpp"
+#include "light.hpp"
 #include "mesh.hpp"
 #include "render_backend/buffer.hpp"
 #include "render_backend/texture.hpp"
@@ -199,28 +200,33 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			cameraDataBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 			cameraDataBinding.pImmutableSamplers = nullptr;
 
-			VkDescriptorSetLayoutBinding textureArrayBinding{};
-			textureArrayBinding.binding = 1;
-			textureArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			textureArrayBinding.descriptorCount = Scene::MaxTextures;
-			textureArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-			textureArrayBinding.pImmutableSamplers = nullptr;
-
-			VkDescriptorSetLayoutBinding shadowMapArrayBinding{};
-			shadowMapArrayBinding.binding = 2;
-			shadowMapArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			shadowMapArrayBinding.descriptorCount = Scene::MaxShadowCasters;
-			shadowMapArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-			shadowMapArrayBinding.pImmutableSamplers = nullptr;
+			VkDescriptorSetLayoutBinding sunLightDataBinding{};
+			sunLightDataBinding.binding = 1;
+			sunLightDataBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			sunLightDataBinding.descriptorCount = 1;
+			sunLightDataBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+			sunLightDataBinding.pImmutableSamplers = nullptr;
 
 			VkDescriptorSetLayoutBinding lightBufferBinding{};
-			lightBufferBinding.binding = 3;
+			lightBufferBinding.binding = 2;
 			lightBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			lightBufferBinding.descriptorCount = 1;
 			lightBufferBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 			lightBufferBinding.pImmutableSamplers = nullptr;
 
-			VkDescriptorSetLayoutBinding sceneDataBindings[] = { cameraDataBinding, textureArrayBinding, shadowMapArrayBinding, lightBufferBinding, };
+			VkDescriptorSetLayoutBinding textureArrayBinding{};
+			textureArrayBinding.binding = 3;
+			textureArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			textureArrayBinding.descriptorCount = Scene::MaxTextures;
+			textureArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+			textureArrayBinding.pImmutableSamplers = nullptr;
+
+			VkDescriptorSetLayoutBinding sceneDataBindings[] = {
+				cameraDataBinding,
+				sunLightDataBinding,
+				lightBufferBinding,
+				textureArrayBinding,
+			};
 			VkDescriptorSetLayoutCreateInfo sceneDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 			sceneDataSetLayout.flags = 0;
 			sceneDataSetLayout.bindingCount = static_cast<uint32_t>(std::size(sceneDataBindings));
@@ -447,12 +453,14 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 
 	// Create uniform buffers
 	{
-		size_t sceneDataBufferSize = sizeof(UniformCameraData);
+		size_t cameraDataBufferSize = sizeof(UniformCameraData);
+		size_t sunLightDataBufferSize = sizeof(UniformSunLightData);
 		size_t lightDataBufferSize = sizeof(SSBOLightEntry);
 		size_t materialBufferSize = sizeof(UniformMaterialData);
 		size_t objectBufferSize = sizeof(UniformObjectData);
 
-		m_cameraDataBuffer = m_pDeviceContext->createBuffer(sceneDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		m_cameraDataBuffer = m_pDeviceContext->createBuffer(cameraDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		m_sunLightDataBuffer = m_pDeviceContext->createBuffer(sunLightDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 		m_lightBuffer = m_pDeviceContext->createBuffer(lightDataBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 		m_materialDataBuffer = m_pDeviceContext->createBuffer(materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 		m_objectDataBuffer = m_pDeviceContext->createBuffer(objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -628,17 +636,15 @@ void ForwardRenderer::update(Scene const& scene)
 			Light const& light = scene.lights[scene.nodes.lightRef[i]];
 			SSBOLightEntry lightEntry{};
 			lightEntry.type = static_cast<uint32_t>(light.type);
-			lightEntry.positionOrDirection = glm::vec3(0);
-			lightEntry.lightSpaceTransform = m_objectTransforms[i]; // FIXME(nemjit001): mul w/ light view matrix
 			lightEntry.color = light.color;
-			lightEntry.shadowMapIndex = RefUnused; // TODO(nemjit001): If shadow caster, find map in shadowmap cache
+			lightEntry.positionOrDirection = glm::vec3(0);
 
 			switch (light.type)
 			{
 			case LightType::Undefined:
 				break;
 			case LightType::Directional:
-				lightEntry.positionOrDirection = glm::normalize(scene.nodes.transform[i].forward());
+				lightEntry.positionOrDirection = glm::normalize(glm::vec3(glm::inverse(m_objectTransforms[i])[2]));
 				break;
 			case LightType::Point:
 				lightEntry.positionOrDirection = scene.nodes.transform[i].position;
@@ -708,16 +714,37 @@ void ForwardRenderer::update(Scene const& scene)
 	}
 
 	// Upload shader data
+	SceneRef const& camParent = scene.nodes.parentRef[scene.activeCamera];
 	Transform const& camTransform = scene.nodes.transform[scene.activeCamera];
+	glm::mat4 const& camParentTransform = (camParent == RefUnused) ? glm::identity<glm::mat4>() : m_objectTransforms[camParent];
+	glm::mat4 const& camViewMatrix = glm::lookAt(camTransform.position + camTransform.forward(), camTransform.position, UP);
+
 	Camera const& camera = scene.cameras[scene.nodes.cameraRef[scene.activeCamera]];
 	UniformCameraData const cameraData{
 		camTransform.position,
-		camera.matrix() * glm::lookAt(camTransform.position + camTransform.forward(), camTransform.position, UP),
+		camera.matrix() * camParentTransform * camViewMatrix,
 	};
 
 	m_cameraDataBuffer->map();
 	memcpy(m_cameraDataBuffer->data(), &cameraData, sizeof(UniformCameraData));
 	m_cameraDataBuffer->unmap();
+
+	glm::vec3 const sunDirection = scene.sun.direction();
+	glm::mat4 const sunProject = Camera::createOrtho(5000.0F, 5000.0F, 1.0F, 10000.0F).matrix();
+	Transform const sunTransform{
+		camTransform.position - (scene.sun.direction() * 5000.0F), //< move frustrum away from camera
+		glm::quatLookAt(scene.sun.direction(), UP),
+	};
+
+	UniformSunLightData const sunLightData{
+		sunDirection,
+		scene.sun.color,
+		sunProject * camParentTransform * glm::inverse(sunTransform.matrix()),
+	};
+
+	m_sunLightDataBuffer->map();
+	memcpy(m_sunLightDataBuffer->data(), &sunLightData, sizeof(UniformSunLightData));
+	m_sunLightDataBuffer->unmap();
 
 	if (!lightBuffer.empty())
 	{
@@ -810,7 +837,7 @@ void ForwardRenderer::update(Scene const& scene)
 
 	// Update all descriptor sets in frame (scene data, texture array, material data, object data)
 	// 4 descriptors for scene + materials + objects
-	uint32_t const descriptorCount = 4 + materialBuffer.size() + objectBuffer.size();
+	uint32_t const descriptorCount = static_cast<uint32_t>(4 + materialBuffer.size() + objectBuffer.size());
 	std::vector<VkDescriptorImageInfo> imageInfos{};
 	std::vector<VkDescriptorBufferInfo> bufferInfos{};
 	std::vector<VkWriteDescriptorSet> descriptorWrites{};
@@ -821,7 +848,7 @@ void ForwardRenderer::update(Scene const& scene)
 	VkDescriptorBufferInfo cameraDataBufferInfo{};
 	cameraDataBufferInfo.buffer = m_cameraDataBuffer->handle();
 	cameraDataBufferInfo.offset = 0;
-	cameraDataBufferInfo.range = sizeof(UniformCameraData);
+	cameraDataBufferInfo.range = m_cameraDataBuffer->size();
 	bufferInfos.emplace_back(cameraDataBufferInfo);
 
 	VkWriteDescriptorSet cameraDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
@@ -833,6 +860,36 @@ void ForwardRenderer::update(Scene const& scene)
 	cameraDataWrite.pBufferInfo = &bufferInfos.back();
 	descriptorWrites.emplace_back(cameraDataWrite);
 
+	VkDescriptorBufferInfo sunLightDataBufferInfo{};
+	sunLightDataBufferInfo.buffer = m_sunLightDataBuffer->handle();
+	sunLightDataBufferInfo.offset = 0;
+	sunLightDataBufferInfo.range = m_sunLightDataBuffer->size();
+	bufferInfos.emplace_back(sunLightDataBufferInfo);
+
+	VkWriteDescriptorSet sunLightDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	sunLightDataWrite.dstSet = m_sceneSet;
+	sunLightDataWrite.dstBinding = 1;
+	sunLightDataWrite.dstArrayElement = 0;
+	sunLightDataWrite.descriptorCount = 1;
+	sunLightDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	sunLightDataWrite.pBufferInfo = &bufferInfos.back();
+	descriptorWrites.emplace_back(sunLightDataWrite);
+
+	VkDescriptorBufferInfo lightBufferInfo{};
+	lightBufferInfo.buffer = m_lightBuffer->handle();
+	lightBufferInfo.offset = 0;
+	lightBufferInfo.range = m_lightBuffer->size();
+	bufferInfos.emplace_back(lightBufferInfo);
+
+	VkWriteDescriptorSet lightBufferWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	lightBufferWrite.dstSet = m_sceneSet;
+	lightBufferWrite.dstBinding = 2;
+	lightBufferWrite.dstArrayElement = 0;
+	lightBufferWrite.descriptorCount = 1;
+	lightBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	lightBufferWrite.pBufferInfo = &bufferInfos.back();
+	descriptorWrites.emplace_back(lightBufferWrite);
+
 	for (size_t textureIdx = 0; textureIdx < scene.textures.size(); textureIdx++)
 	{
 		VkDescriptorImageInfo textureImageInfo{};
@@ -843,30 +900,13 @@ void ForwardRenderer::update(Scene const& scene)
 		
 		VkWriteDescriptorSet textureWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
 		textureWrite.dstSet = m_sceneSet;
-		textureWrite.dstBinding = 1;
+		textureWrite.dstBinding = 3;
 		textureWrite.dstArrayElement = static_cast<uint32_t>(textureIdx);
 		textureWrite.descriptorCount = 1;
 		textureWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		textureWrite.pImageInfo = &imageInfos.back();
 		descriptorWrites.emplace_back(textureWrite);
 	}
-
-	// TODO(nemjit001): Write shadow map texture descriptors
-
-	VkDescriptorBufferInfo lightBufferInfo{};
-	lightBufferInfo.buffer = m_lightBuffer->handle();
-	lightBufferInfo.offset = 0;
-	lightBufferInfo.range = m_lightBuffer->size();
-	bufferInfos.emplace_back(lightBufferInfo);
-
-	VkWriteDescriptorSet lightBufferWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-	lightBufferWrite.dstSet = m_sceneSet;
-	lightBufferWrite.dstBinding = 3;
-	lightBufferWrite.dstArrayElement = 0;
-	lightBufferWrite.descriptorCount = 1;
-	lightBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	lightBufferWrite.pBufferInfo = &bufferInfos.back();
-	descriptorWrites.emplace_back(lightBufferWrite);
 
 	for (size_t materialIdx = 0; materialIdx < materialBuffer.size(); materialIdx++)
 	{

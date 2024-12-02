@@ -20,12 +20,21 @@ vec4 linear(vec4 color)
 	return vec4(pow(color.rgb, vec3(GAMMA)), color.a);
 }
 
-/// @brief Simple shadow mapping implementation for directional lights.
+/// @brief Calculate shadow bias.
+/// @param N normal vector.
+/// @param L light vector.
+/// @return 
+float shadowBias(vec3 N, vec3 L)
+{
+	return max(0.05 * (1.0 - dot(N, L)), 0.005); //< Shadow bias in range [0.005, 005]
+}
+
+/// @brief Simple shadow mapping implementation.
 /// @param fragPos Fragment position in light space.
 /// @param shadowMap Shadow map associated with the light.
 /// @param shadowBias Shadow bias to apply.
 /// @return A float representing shadow strength.
-float shadowStrengthDirectionalLight(vec4 fragPos, sampler2D shadowMap, float shadowBias)
+float shadowStrength(vec4 fragPos, sampler2D shadowMap, float shadowBias)
 {
 	vec3 uvw = 0.5 + 0.5 * (fragPos.xyz / fragPos.w); //< projected frag position in range [0,1]
 	float shadowDepth = texture(shadowMap, uvw.xy).r;

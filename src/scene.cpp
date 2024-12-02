@@ -1,8 +1,21 @@
 #include "scene.hpp"
 
 #include "camera.hpp"
+#include "light.hpp"
 #include "mesh.hpp"
 #include "render_backend/texture.hpp"
+
+glm::vec3 Sun::direction() const
+{
+    float const azimuthRad = glm::radians(azimuth);
+    float const elevationRad = glm::radians(90.0F + zenith);
+
+    return glm::normalize(glm::vec3(
+        glm::cos(azimuthRad) * glm::sin(elevationRad),
+        glm::cos(elevationRad),
+        glm::sin(azimuthRad) * glm::sin(elevationRad)
+    ));
+}
 
 SceneRef Scene::addCamera(Camera const& camera)
 {
@@ -57,6 +70,7 @@ SceneRef Scene::createChildNode(SceneRef const& parent, std::string const& name,
     assert(parent != RefUnused);
 
     SceneRef ref = createNode(name, transform);
+    nodes.parentRef[ref] = parent;
     nodes.children[parent].emplace_back(ref);
     return ref;
 }
@@ -90,6 +104,7 @@ SceneRef Scene::createNode(std::string const& name, Transform const& transform)
     SceneRef ref = static_cast<SceneRef>(nodes.count);
     nodes.name.push_back(name);
     nodes.transform.push_back(transform);
+    nodes.parentRef.emplace_back(RefUnused);
     nodes.cameraRef.push_back(RefUnused);
     nodes.meshRef.push_back(RefUnused);
     nodes.lightRef.push_back(RefUnused);
@@ -104,6 +119,7 @@ SceneRef Scene::createNode(std::string const& name, Transform const& transform)
         && nodes.count == nodes.meshRef.size()
         && nodes.count == nodes.lightRef.size()
         && nodes.count == nodes.materialRef.size()
+        && nodes.count == nodes.parentRef.size()
         && nodes.count == nodes.children.size()
     );
 

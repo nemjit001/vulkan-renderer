@@ -8,24 +8,21 @@
 #include "transform.hpp"
 
 struct Camera;
+struct Light;
 class Mesh;
 class Texture;
 
 using SceneRef = uint32_t;
-constexpr SceneRef RefUnused = ~0U;
+constexpr SceneRef RefUnused = (~0U);
 
-enum class LightType
+/// @brief Sun data for a scene.
+struct Sun
 {
-    Undefined = 0,
-    Directional = 1,
-    Point = 2,
-};
+    glm::vec3 direction() const;
 
-struct Light
-{
-    LightType type;
-    bool shadowCaster;
-    glm::vec3 color;
+    float azimuth   = 0.0F;
+    float zenith    = 0.0F;
+    glm::vec3 color = glm::vec3(1.0F);
 };
 
 /// @brief Material data, contains defaults and references to scene textures.
@@ -67,6 +64,8 @@ public:
     static constexpr uint32_t MaxTextures = 1024; //< Required for descriptor indexing in renderer
     static constexpr uint32_t MaxShadowCasters = 64; //< Required for descriptor indexing in renderer
 
+    Sun sun{}; //< XXX: Currently there is always a sun light available, should this be optional?
+
     SceneRef activeCamera = RefUnused; //< Reference to a scene node containing a camera reference
     std::vector<SceneRef> rootNodes{};
 
@@ -81,6 +80,7 @@ public:
         uint32_t count = 0;
         std::vector<std::string> name{};
         std::vector<Transform> transform{};
+        std::vector<SceneRef> parentRef{};
         std::vector<SceneRef> cameraRef{};
         std::vector<SceneRef> meshRef{};
         std::vector<SceneRef> lightRef{};
