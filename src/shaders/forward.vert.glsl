@@ -11,7 +11,7 @@ layout(location = 4) in vec2 v_TexCoord;
 
 layout(location = 0) out FS_IN
 {
-	vec3 o_Position;
+	vec4 o_Position;
 	vec3 o_Color;
 	vec2 o_TexCoord;
 	mat3 o_TBN;
@@ -26,7 +26,7 @@ void main()
 	vec3 B = normalize(cross(T, N));
 
 	gl_Position = camera.matrix * position;
-	o_Position = position.xyz / position.w;
+	o_Position = position;
 	o_Color = v_Color;
 	o_TexCoord = v_TexCoord;
 	o_TBN = mat3(T, B, N);

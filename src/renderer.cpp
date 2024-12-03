@@ -479,7 +479,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			sunLightDataBinding.binding = 1;
 			sunLightDataBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 			sunLightDataBinding.descriptorCount = 1;
-			sunLightDataBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+			sunLightDataBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 			sunLightDataBinding.pImmutableSamplers = nullptr;
 
 			VkDescriptorSetLayoutBinding lightBufferBinding{};
@@ -911,10 +911,15 @@ void ForwardRenderer::update(Scene const& scene)
 	}
 
 	// Set sun transform
+	// TODO(nemjit001): Adjust to be more robust, eventually add cascades
 	SceneRef const& camParent = scene.nodes.parentRef[scene.activeCamera];
 	glm::mat4 const& camParentTransform = (camParent == RefUnused) ? glm::identity<glm::mat4>() : m_objectTransforms[camParent];
+
+	glm::vec3 sunPosition = scene.nodes.transform[scene.activeCamera].position;
+	sunPosition += -scene.sun.direction() * 0.5F * SunShadowExtent.z; // Offset by half Z extent
+
 	glm::mat4 const sunProject = Camera::createOrtho(SunShadowExtent.x, SunShadowExtent.y, 1.0F, SunShadowExtent.z).matrix();
-	glm::mat4 const sunTransform = camParentTransform; // TODO(nemjit001): Figure out right transform matrix for cam-following sun light
+	glm::mat4 const sunView = camParentTransform * glm::lookAt(sunPosition, sunPosition + scene.sun.direction(), UP); // TODO(nemjit001): Figure out right transform matrix for cam-following sun light
 
 	// Update shadow map pipeline state
 	{
@@ -953,7 +958,7 @@ void ForwardRenderer::update(Scene const& scene)
 
 		// Upload shader data
 		UniformShadowMapCameraData const sunCameraData {
-			sunProject * glm::inverse(sunTransform),
+			sunProject * sunView,
 		};
 
 		m_sunCameraDataBuffer->map();
@@ -1160,7 +1165,7 @@ void ForwardRenderer::update(Scene const& scene)
 		}
 
 		// Upload shader data
-		glm::mat4 const& camTransform = camParentTransform * scene.nodes.transform[scene.activeCamera].matrix();
+		glm::mat4 const& camTransform = m_objectTransforms[scene.activeCamera];
 		glm::mat4 const& camViewMatrix = glm::lookAt(Transform::getPosition(camTransform) + Transform::getForward(camTransform), Transform::getPosition(camTransform), UP);
 
 		Camera const& camera = scene.cameras[scene.nodes.cameraRef[scene.activeCamera]];
@@ -1177,7 +1182,7 @@ void ForwardRenderer::update(Scene const& scene)
 			scene.sun.direction(),
 			scene.sun.color,
 			scene.sun.ambient,
-			sunProject * camParentTransform * glm::inverse(sunTransform),
+			sunProject * sunView,
 		};
 
 		m_sunLightDataBuffer->map();

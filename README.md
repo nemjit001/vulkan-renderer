@@ -21,7 +21,7 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 	- [X] Sun light (directional)
 	- [X] Multiple point lights
 - [ ] Render pipeline
-	- [ ] Shadow mapping pass
+	- [X] Shadow mapping pass
 	- [ ] Depth prepass
 	- [ ] Forward opaque pass
 	- [ ] Transparency pass

@@ -9,7 +9,7 @@
 
 layout(location = 0) in FS_IN
 {
-	vec3 i_Position;
+	vec4 i_Position;
 	vec3 i_Color;
 	vec2 i_TexCoord;
 	mat3 i_TBN;
@@ -38,11 +38,14 @@ void main()
 	}
 
 	// Calculate fixed material params
+	vec3 fragPosition = i_Position.xyz / i_Position.w;
 	vec3 N = normalize(i_TBN * normal);
-	vec3 V = normalize(camera.position - i_Position);
-
-	// Gather light influences
+	vec3 V = normalize(camera.position - fragPosition);
 	vec3 outColor = vec3(0.0);
+
+	// Flip 0 to 1 to enable arbitrary light counts
+#if 0
+	// Gather light influences
 	for (uint lightIdx = 0; lightIdx < lights.length(); lightIdx++)
 	{
 		Light light = lights[lightIdx];
@@ -56,7 +59,7 @@ void main()
 		}
 		else if (light.type == LIGHT_TYPE_POINT)
 		{
-			vec3 lightVec = light.positionOrDirection - i_Position;
+			vec3 lightVec = light.positionOrDirection - fragPosition;
 			lightColor /= dot(lightVec, lightVec); //< divide color strength by squared distance to light
 			L = normalize(lightVec);
 		}
@@ -65,10 +68,11 @@ void main()
 		float shadowStrength = 0.0;
 		outColor += modelBlinnPhong(albedo.rgb, specular, lightColor, vec3(0), shadowStrength, N, L, V);
 	}
+#endif
 
 	// Gather sun light influence
 	vec3 sunL = normalize(-sun.direction);
-	float sunShadowStrength = shadowStrength(sun.lightSpaceTransform * vec4(i_Position, 1.0), sunShadowMap, shadowBias(N, sunL));
+	float sunShadowStrength = shadowStrength(sun.lightSpaceTransform * i_Position, sunShadowMap, shadowBias(N, sunL));
 	outColor += modelBlinnPhong(albedo.rgb, specular, sun.color, sun.ambient, sunShadowStrength, N, sunL, V);
 
 	// Output color with preserved alpha

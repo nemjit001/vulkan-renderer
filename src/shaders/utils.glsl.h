@@ -38,8 +38,9 @@ float shadowStrength(vec4 fragPos, sampler2D shadowMap, float shadowBias)
 {
 	vec3 projected = fragPos.xyz / fragPos.w;
 	vec3 uvw = 0.5 + 0.5 * projected;
-	float shadowDepth = texture(shadowMap, uvw.xy).r;
-	float adjustedDepth = uvw.z - shadowBias;
+	vec2 uv = vec2(uvw.x, 1.0 - uvw.y); //< Convert to Vulkan texture space
+	float shadowDepth = texture(shadowMap, uv).r;
+	float adjustedDepth = projected.z - shadowBias;
 	return adjustedDepth > shadowDepth ? 1.0 : 0.0;
 }
 

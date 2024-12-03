@@ -83,7 +83,7 @@ Engine::Engine()
 
     Camera camera = Camera::createPerspective(60.0F, static_cast<float>(m_framebufferWidth) / static_cast<float>(m_framebufferHeight), 1.0F, 5'000.0F);
     SceneRef cameraRef = scene.addCamera(camera);
-    SceneRef cameraNode = scene.createRootNode("Camera", Transform{ { 0.0F, 50.0F, -5.0F } });
+    SceneRef cameraNode = scene.createRootNode("Camera", Transform{{ 0.0F, 50.0F, -5.0F }});
     scene.nodes.cameraRef[cameraNode] = cameraRef;
     scene.activeCamera = cameraNode;
 
