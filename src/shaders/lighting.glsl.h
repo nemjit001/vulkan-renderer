@@ -10,16 +10,16 @@
 /// @param L Light vector, normalized.
 /// @param V View vector, normalized.
 /// @return Lighting model output color.
-vec3 modelBlinnPhong(vec3 albedo, vec3 specular, vec3 lightColor, float shadowStength, vec3 N, vec3 L, vec3 V)
+vec3 modelBlinnPhong(vec3 albedo, vec3 specular, vec3 lightColor, vec3 ambientLight, float shadowStength, vec3 N, vec3 L, vec3 V)
 {
 	vec3 H = normalize(V + L);
-	float NoL = clamp(0.0, 1.0, dot(N, L));
-	float NoH = clamp(0.0, 1.0, dot(N, H));
+	float NoL = clamp(dot(N, L), 0.0, 1.0);
+	float NoH = clamp(dot(N, H), 0.0, 1.0);
 
 	vec3 diffuseComponent = NoL * lightColor;
 	vec3 specularComponent = pow(NoH, 64.0) * lightColor;
 
-	return (1.0 - shadowStength) * (diffuseComponent + specularComponent) * albedo;
+	return (ambientLight + (1.0 - shadowStength) * (diffuseComponent + specularComponent)) * albedo;
 }
 
 #endif  // LIGHTING_GLSL_H

@@ -9,7 +9,7 @@
 
 layout(location = 0) in FS_IN
 {
-	vec4 i_Position;
+	vec3 i_Position;
 	vec3 i_Color;
 	vec2 i_TexCoord;
 	mat3 i_TBN;
@@ -38,9 +38,8 @@ void main()
 	}
 
 	// Calculate fixed material params
-	vec3 fragPosition = i_Position.xyz / i_Position.w;
 	vec3 N = normalize(i_TBN * normal);
-	vec3 V = normalize(camera.position - fragPosition);
+	vec3 V = normalize(camera.position - i_Position);
 
 	// Gather light influences
 	vec3 outColor = vec3(0.0);
@@ -57,19 +56,20 @@ void main()
 		}
 		else if (light.type == LIGHT_TYPE_POINT)
 		{
-			vec3 lightVec = light.positionOrDirection - fragPosition;
+			vec3 lightVec = light.positionOrDirection - i_Position;
 			lightColor /= dot(lightVec, lightVec); //< divide color strength by squared distance to light
 			L = normalize(lightVec);
 		}
 
 		// Update output color.
 		float shadowStrength = 0.0;
-		outColor += modelBlinnPhong(albedo.rgb, specular, lightColor, shadowStrength, N, L, V);
+		outColor += modelBlinnPhong(albedo.rgb, specular, lightColor, vec3(0), shadowStrength, N, L, V);
 	}
 
 	// Gather sun light influence
-	float sunShadowStrength = 0.0; // TODO(nemjit001): use shadow map for sun light in scene.
-	outColor += modelBlinnPhong(albedo.rgb, specular, sun.color, sunShadowStrength, N, normalize(-sun.direction), V);
+	vec3 sunL = normalize(-sun.direction);
+	float sunShadowStrength = shadowStrength(sun.lightSpaceTransform * vec4(i_Position, 1.0), sunShadowMap, shadowBias(N, sunL));
+	outColor += modelBlinnPhong(albedo.rgb, specular, sun.color, sun.ambient, sunShadowStrength, N, sunL, V);
 
 	// Output color with preserved alpha
 	f_FragColor = vec4(outColor, albedo.a);

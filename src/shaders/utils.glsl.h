@@ -36,7 +36,8 @@ float shadowBias(vec3 N, vec3 L)
 /// @return A float representing shadow strength.
 float shadowStrength(vec4 fragPos, sampler2D shadowMap, float shadowBias)
 {
-	vec3 uvw = 0.5 + 0.5 * (fragPos.xyz / fragPos.w); //< projected frag position in range [0,1]
+	vec3 projected = fragPos.xyz / fragPos.w;
+	vec3 uvw = 0.5 + 0.5 * projected;
 	float shadowDepth = texture(shadowMap, uvw.xy).r;
 	float adjustedDepth = uvw.z - shadowBias;
 	return adjustedDepth > shadowDepth ? 1.0 : 0.0;

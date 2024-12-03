@@ -23,6 +23,7 @@ struct Sun
     float azimuth   = 0.0F;
     float zenith    = 0.0F;
     glm::vec3 color = glm::vec3(1.0F);
+    glm::vec3 ambient = glm::vec3(0.05F);
 };
 
 /// @brief Material data, contains defaults and references to scene textures.

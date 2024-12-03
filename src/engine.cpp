@@ -88,7 +88,7 @@ Engine::Engine()
     scene.activeCamera = cameraNode;
 
     // Load scene files from disk
-    if (!loadScene(m_pDeviceContext.get(), "data/assets/Sponza/sponza.obj", scene))
+    if (!loadScene(m_pDeviceContext.get(), "data/assets/sponza/sponza.obj", scene))
     {
         printf("VK Renderer scene load failed\n");
         m_running = false;
@@ -223,8 +223,9 @@ void Engine::update()
 
         ImGui::SeparatorText("Sun");
         ImGui::DragFloat("Azimuth", &scene.sun.azimuth, 1.0F, 0.0F, 360.0F);
-        ImGui::DragFloat("Zenith", &scene.sun.zenith, 1.0F, 0.0F, 90.0F);
+        ImGui::DragFloat("Zenith", &scene.sun.zenith, 1.0F, 0.01F, 89.9F);
         ImGui::ColorPicker3("Color", &scene.sun.color[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_DisplayRGB);
+        ImGui::ColorPicker3("Ambient", &scene.sun.ambient[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_DisplayRGB);
 
         ImGui::SeparatorText("Camera");
         ImGui::Text("Position: %8.2f %8.2f %8.2f", camPosition.x, camPosition.y, camPosition.z);

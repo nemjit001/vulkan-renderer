@@ -19,6 +19,7 @@ struct SunLight
 {
 	vec3 direction;
 	vec3 color;
+	vec3 ambient;
 	mat4 lightSpaceTransform;
 };
 
@@ -48,7 +49,9 @@ struct Object
 layout(set = 0, binding = 0) uniform CAMERA_DATA { Camera camera; };
 layout(set = 0, binding = 1) uniform SUN_LIGHT_DATA { SunLight sun; };
 layout(set = 0, binding = 2) buffer LIGHT_BUFFER { Light lights[]; };
+
 layout(set = 0, binding = 3) uniform sampler2D textureMaps[];
+layout(set = 0, binding = 4) uniform sampler2D sunShadowMap;
 
 //-- Material uniforms --//
 layout(set = 1, binding = 0) uniform MATERIAL_DATA { Material material; };
