@@ -211,7 +211,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 
 			float viewportWidth = static_cast<float>(SunShadowMapResolutionX);
 			float viewportHeight = static_cast<float>(SunShadowMapResolutionY);
-			VkViewport viewport = VkViewport{ 0.0F, viewportHeight, viewportWidth, -viewportHeight, 0.0F, 1.0F };
+			VkViewport viewport = VkViewport{ 0.0F, 0.0F, viewportWidth, viewportHeight, 0.0F, 1.0F };
 			VkRect2D scissor = VkRect2D{ { 0, 0 }, { SunShadowMapResolutionX, SunShadowMapResolutionY } };
 
 			VkPipelineViewportStateCreateInfo viewportState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
@@ -1418,7 +1418,7 @@ void ForwardRenderer::render(Scene const& scene)
 		// Set viewport & scissor
 		float viewportWidth = static_cast<float>(SunShadowMapResolutionX);
 		float viewportHeight = static_cast<float>(SunShadowMapResolutionY);
-		VkViewport viewport = { 0.0F, viewportHeight, viewportWidth, -viewportHeight, 0.0F, 1.0F };
+		VkViewport viewport = { 0.0F, 0.0F, viewportWidth, viewportHeight, 0.0F, 1.0F };
 		VkRect2D scissor = { { 0, 0 }, { SunShadowMapResolutionX, SunShadowMapResolutionY } };
 		vkCmdSetViewport(m_frameCommands.handle, 0, 1, &viewport);
 		vkCmdSetScissor(m_frameCommands.handle, 0, 1, &scissor);
