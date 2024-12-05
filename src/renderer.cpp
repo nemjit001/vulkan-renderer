@@ -8,6 +8,7 @@
 
 #include "assets.hpp"
 #include "camera.hpp"
+#include "light.hpp"
 #include "mesh.hpp"
 #include "render_backend/buffer.hpp"
 #include "render_backend/texture.hpp"
@@ -47,6 +48,281 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 		throw std::runtime_error("Forward Renderer command data create failed\n");
 	}
 
+	// Create shadow map rendering members
+	{
+		// Create shadow map render pass
+		{
+			VkAttachmentDescription depthStencilAttachment{};
+			depthStencilAttachment.flags = 0;
+			depthStencilAttachment.format = VK_FORMAT_D24_UNORM_S8_UINT;
+			depthStencilAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+			depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+			depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+			depthStencilAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+			depthStencilAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			depthStencilAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			depthStencilAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+			VkAttachmentReference shadowMapDepthAttachment = { 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+			VkSubpassDescription shadowMapPass{};
+			shadowMapPass.flags = 0;
+			shadowMapPass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+			shadowMapPass.inputAttachmentCount = 0;
+			shadowMapPass.pInputAttachments = nullptr;
+			shadowMapPass.colorAttachmentCount = 0;
+			shadowMapPass.pColorAttachments = nullptr;
+			shadowMapPass.pResolveAttachments = nullptr;
+			shadowMapPass.pDepthStencilAttachment = &shadowMapDepthAttachment;
+			shadowMapPass.preserveAttachmentCount = 0;
+			shadowMapPass.pPreserveAttachments = nullptr;
+
+			VkRenderPassCreateInfo renderPassCreateInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+			renderPassCreateInfo.flags = 0;
+			renderPassCreateInfo.attachmentCount = 1;
+			renderPassCreateInfo.pAttachments = &depthStencilAttachment;
+			renderPassCreateInfo.subpassCount = 1;
+			renderPassCreateInfo.pSubpasses = &shadowMapPass;
+			renderPassCreateInfo.dependencyCount = 0;
+			renderPassCreateInfo.pDependencies = nullptr;
+
+			if (VK_FAILED(vkCreateRenderPass(m_pDeviceContext->device, &renderPassCreateInfo, nullptr, &m_shadowMapRenderPass))) {
+				throw std::runtime_error("Forward Renderer shadow map render pass create failed");
+			}
+		}
+
+		// Create sun shadow map & forward framebuffers
+		{
+			m_sunShadowMap = m_pDeviceContext->createTexture(
+				VK_IMAGE_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, SunShadowMapResolutionX, SunShadowMapResolutionY, 1
+			);
+
+			if (m_sunShadowMap == nullptr || !m_sunShadowMap->initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_DEPTH_BIT)) {
+				throw std::runtime_error("Forward Renderer sun shadow map create failed");
+			}
+
+			VkFramebufferCreateInfo sunShadowMapFramebufferCreateInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+			sunShadowMapFramebufferCreateInfo.flags = 0;
+			sunShadowMapFramebufferCreateInfo.renderPass = m_shadowMapRenderPass;
+			sunShadowMapFramebufferCreateInfo.attachmentCount = 1;
+			sunShadowMapFramebufferCreateInfo.pAttachments = &m_sunShadowMap->view;
+			sunShadowMapFramebufferCreateInfo.width = SunShadowMapResolutionX;
+			sunShadowMapFramebufferCreateInfo.height = SunShadowMapResolutionY;
+			sunShadowMapFramebufferCreateInfo.layers = 1;
+
+			vkCreateFramebuffer(m_pDeviceContext->device, &sunShadowMapFramebufferCreateInfo, nullptr, &m_sunShadowMapFramebuffer);
+			assert(m_sunShadowMapFramebuffer != VK_NULL_HANDLE);
+		}
+
+		// Create shadow map pipeline descriptor set layouts
+		{
+			VkDescriptorSetLayoutBinding shadowMapCameraDataBinding{};
+			shadowMapCameraDataBinding.binding = 0;
+			shadowMapCameraDataBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			shadowMapCameraDataBinding.descriptorCount = 1;
+			shadowMapCameraDataBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+			shadowMapCameraDataBinding.pImmutableSamplers = nullptr;
+
+			VkDescriptorSetLayoutCreateInfo shadowMapCameraDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+			shadowMapCameraDataSetLayout.flags = 0;
+			shadowMapCameraDataSetLayout.bindingCount = 1;
+			shadowMapCameraDataSetLayout.pBindings = &shadowMapCameraDataBinding;
+
+			VkDescriptorSetLayoutBinding shadowMapObjectDataBinding{};
+			shadowMapObjectDataBinding.binding = 0;
+			shadowMapObjectDataBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			shadowMapObjectDataBinding.descriptorCount = 1;
+			shadowMapObjectDataBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+			shadowMapObjectDataBinding.pImmutableSamplers = nullptr;
+
+			VkDescriptorSetLayoutCreateInfo shadowMapObjectDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+			shadowMapObjectDataSetLayout.flags = 0;
+			shadowMapObjectDataSetLayout.bindingCount = 1;
+			shadowMapObjectDataSetLayout.pBindings = &shadowMapObjectDataBinding;
+
+			if (VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &shadowMapCameraDataSetLayout, nullptr, &m_shadowMapCameraDataSetLayout))
+				|| VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &shadowMapObjectDataSetLayout, nullptr, &m_shadowMapObjectDataSetLayout))) {
+				throw std::runtime_error("Forward Renderer shadow map descriptor set layout create failed");
+			}
+		}
+
+		// Create shadow map pipeline layout
+		{
+			VkDescriptorSetLayout setLayouts[] = { m_shadowMapCameraDataSetLayout, m_shadowMapObjectDataSetLayout, };
+			VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+			pipelineLayoutCreateInfo.flags = 0;
+			pipelineLayoutCreateInfo.setLayoutCount = static_cast<uint32_t>(std::size(setLayouts));
+			pipelineLayoutCreateInfo.pSetLayouts = setLayouts;
+			pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
+			pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
+
+			if (VK_FAILED(vkCreatePipelineLayout(m_pDeviceContext->device, &pipelineLayoutCreateInfo, nullptr, &m_shadowMapPipelineLayout))) {
+				throw std::runtime_error("Foward Renderer shadow map pipeline layout create failed");
+			}
+		}
+
+		// Create shadow map graphics pipeline
+		{
+			std::vector<uint32_t> vertShaderCode{};
+			if (!readShaderFile("shadow_map.vert.spv", vertShaderCode)) {
+				throw std::runtime_error("Forward Renderer shader read failed (shadow map)");
+			}
+
+			VkShaderModuleCreateInfo shadowmapVertModuleCreateInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };;
+			shadowmapVertModuleCreateInfo.flags = 0;
+			shadowmapVertModuleCreateInfo.codeSize = static_cast<uint32_t>(4 * vertShaderCode.size());
+			shadowmapVertModuleCreateInfo.pCode = vertShaderCode.data();
+
+			VkShaderModule shadowmapVertModule = VK_NULL_HANDLE;
+			if (VK_FAILED(vkCreateShaderModule(m_pDeviceContext->device, &shadowmapVertModuleCreateInfo, nullptr, &shadowmapVertModule))) {
+				throw std::runtime_error("Forward Renderer shader module create failed (shadow mapping)");
+			}
+
+			VkPipelineShaderStageCreateInfo shadowmapVertStage{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+			shadowmapVertStage.flags = 0;
+			shadowmapVertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+			shadowmapVertStage.module = shadowmapVertModule;
+			shadowmapVertStage.pName = "main";
+			shadowmapVertStage.pSpecializationInfo = nullptr;
+
+			VkVertexInputBindingDescription bindingDescriptions[] = {
+				{ 0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX, }
+			};
+
+			VkVertexInputAttributeDescription attributeDescriptions[] = {
+				{ 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position), },
+				{ 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color), },
+				{ 2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal), },
+				{ 3, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, tangent), },
+				{ 4, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, texCoord), },
+			};
+
+			VkPipelineVertexInputStateCreateInfo vertexInputState{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+			vertexInputState.flags = 0;
+			vertexInputState.vertexBindingDescriptionCount = static_cast<uint32_t>(std::size(bindingDescriptions));
+			vertexInputState.pVertexBindingDescriptions = bindingDescriptions;
+			vertexInputState.vertexAttributeDescriptionCount = static_cast<uint32_t>(std::size(attributeDescriptions));
+			vertexInputState.pVertexAttributeDescriptions = attributeDescriptions;
+
+			VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+			inputAssemblyState.flags = 0;
+			inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+			inputAssemblyState.primitiveRestartEnable = VK_FALSE;
+
+			float viewportWidth = static_cast<float>(SunShadowMapResolutionX);
+			float viewportHeight = static_cast<float>(SunShadowMapResolutionY);
+			VkViewport viewport = VkViewport{ 0.0F, 0.0F, viewportWidth, viewportHeight, 0.0F, 1.0F };
+			VkRect2D scissor = VkRect2D{ { 0, 0 }, { SunShadowMapResolutionX, SunShadowMapResolutionY } };
+
+			VkPipelineViewportStateCreateInfo viewportState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+			viewportState.flags = 0;
+			viewportState.viewportCount = 1;
+			viewportState.pViewports = &viewport;
+			viewportState.scissorCount = 1;
+			viewportState.pScissors = &scissor;
+
+			VkPipelineRasterizationStateCreateInfo rasterizationState{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+			rasterizationState.flags = 0;
+			rasterizationState.depthClampEnable = VK_FALSE;
+			rasterizationState.rasterizerDiscardEnable = VK_FALSE;
+			rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
+			rasterizationState.cullMode = VK_CULL_MODE_NONE;
+			rasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+			rasterizationState.depthBiasEnable = VK_FALSE;
+			rasterizationState.depthBiasConstantFactor = 0.0F;
+			rasterizationState.depthBiasClamp = 0.0F;
+			rasterizationState.depthBiasSlopeFactor = 0.0F;
+			rasterizationState.lineWidth = 1.0F;
+
+			VkPipelineMultisampleStateCreateInfo multisampleState{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+			multisampleState.flags = 0;
+			multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+			multisampleState.sampleShadingEnable = VK_FALSE;
+			multisampleState.minSampleShading = 0.0F;
+			multisampleState.pSampleMask = nullptr;
+			multisampleState.alphaToCoverageEnable = VK_FALSE;
+			multisampleState.alphaToOneEnable = VK_FALSE;
+
+			VkPipelineDepthStencilStateCreateInfo depthStencilState{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+			depthStencilState.flags = 0;
+			depthStencilState.depthTestEnable = VK_TRUE;
+			depthStencilState.depthWriteEnable = VK_TRUE;
+			depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS;
+			depthStencilState.depthBoundsTestEnable = VK_TRUE;
+			depthStencilState.stencilTestEnable = VK_FALSE;
+			depthStencilState.front = { VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_NEVER, UINT32_MAX, UINT32_MAX, UINT32_MAX };
+			depthStencilState.back = { VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_NEVER, UINT32_MAX, UINT32_MAX, UINT32_MAX };
+			depthStencilState.minDepthBounds = 0.0F;
+			depthStencilState.maxDepthBounds = 1.0F;
+
+			VkPipelineColorBlendAttachmentState colorBlendTarget{};
+			colorBlendTarget.blendEnable = VK_FALSE;
+			colorBlendTarget.srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+			colorBlendTarget.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+			colorBlendTarget.colorBlendOp = VK_BLEND_OP_ADD;
+			colorBlendTarget.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+			colorBlendTarget.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+			colorBlendTarget.alphaBlendOp = VK_BLEND_OP_ADD;
+			colorBlendTarget.colorWriteMask = VK_COLOR_COMPONENT_R_BIT
+				| VK_COLOR_COMPONENT_G_BIT
+				| VK_COLOR_COMPONENT_B_BIT
+				| VK_COLOR_COMPONENT_A_BIT;
+
+			VkPipelineColorBlendAttachmentState colorBlendAttachments[] = { colorBlendTarget, };
+			VkPipelineColorBlendStateCreateInfo colorBlendState{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+			colorBlendState.flags = 0;
+			colorBlendState.logicOpEnable = VK_FALSE;
+			colorBlendState.logicOp = VK_LOGIC_OP_CLEAR;
+			colorBlendState.attachmentCount = static_cast<uint32_t>(std::size(colorBlendAttachments));
+			colorBlendState.pAttachments = colorBlendAttachments;
+			colorBlendState.blendConstants[0] = 0.0F;
+			colorBlendState.blendConstants[1] = 0.0F;
+			colorBlendState.blendConstants[2] = 0.0F;
+			colorBlendState.blendConstants[3] = 0.0F;
+
+			VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, };
+			VkPipelineDynamicStateCreateInfo dynamicState{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+			dynamicState.flags = 0;
+			dynamicState.dynamicStateCount = static_cast<uint32_t>(std::size(dynamicStates));
+			dynamicState.pDynamicStates = dynamicStates;
+
+			VkGraphicsPipelineCreateInfo shadowMapPipelineCreateInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+			shadowMapPipelineCreateInfo.flags = 0;
+			shadowMapPipelineCreateInfo.stageCount = 1;
+			shadowMapPipelineCreateInfo.pStages = &shadowmapVertStage;
+			shadowMapPipelineCreateInfo.pVertexInputState = &vertexInputState;
+			shadowMapPipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
+			shadowMapPipelineCreateInfo.pTessellationState = nullptr;
+			shadowMapPipelineCreateInfo.pViewportState = &viewportState;
+			shadowMapPipelineCreateInfo.pRasterizationState = &rasterizationState;
+			shadowMapPipelineCreateInfo.pMultisampleState = &multisampleState;
+			shadowMapPipelineCreateInfo.pDepthStencilState = &depthStencilState;
+			shadowMapPipelineCreateInfo.pColorBlendState = &colorBlendState;
+			shadowMapPipelineCreateInfo.pDynamicState = &dynamicState;
+			shadowMapPipelineCreateInfo.layout = m_shadowMapPipelineLayout;
+			shadowMapPipelineCreateInfo.renderPass = m_shadowMapRenderPass;
+			shadowMapPipelineCreateInfo.subpass = 0;
+			shadowMapPipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
+			shadowMapPipelineCreateInfo.basePipelineIndex = 0;
+
+			if (VK_FAILED(vkCreateGraphicsPipelines(m_pDeviceContext->device, VK_NULL_HANDLE, 1, &shadowMapPipelineCreateInfo, nullptr, &m_shadowMapPipeline))) {
+				throw std::runtime_error("Forward renderer shadow map pipeline create failed");
+			}
+
+			vkDestroyShaderModule(m_pDeviceContext->device, shadowmapVertModule, nullptr);
+		}
+
+		// Create shader buffers
+		{
+			m_sunCameraDataBuffer = m_pDeviceContext->createBuffer(sizeof(UniformShadowMapCameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+			m_shadowMapObjectDataBuffer = m_pDeviceContext->createBuffer(sizeof(UniformShadowMapObjectData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+			if (m_sunCameraDataBuffer == nullptr || m_shadowMapObjectDataBuffer == nullptr) {
+				throw std::runtime_error("Forward Renderer shadow map shader buffer create failed");
+			}
+		}
+	}
+
 	// Create forward rendering members
 	{
 		// Create forward render pass
@@ -64,7 +340,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 
 			VkAttachmentDescription depthStencilAttachment{};
 			depthStencilAttachment.flags = 0;
-			depthStencilAttachment.format = VK_FORMAT_D32_SFLOAT;
+			depthStencilAttachment.format = VK_FORMAT_D24_UNORM_S8_UINT;
 			depthStencilAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
 			depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 			depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -109,19 +385,19 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			renderPassCreateInfo.pDependencies = dependencies;
 
 			if (VK_FAILED(vkCreateRenderPass(m_pDeviceContext->device, &renderPassCreateInfo, nullptr, &m_forwardRenderPass))) {
-				throw std::runtime_error("Forward Renderer forward render pass create failed\n");
+				throw std::runtime_error("Forward Renderer forward render pass create failed");
 			}
 		}
 
 		// Create depth stencil target & forward framebuffers
 		{
 			m_depthStencilTexture = m_pDeviceContext->createTexture(
-				VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+				VK_IMAGE_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_framebufferWidth, m_framebufferHeight, 1
 			);
 
 			if (m_depthStencilTexture == nullptr || !m_depthStencilTexture->initDefaultView(VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_DEPTH_BIT)) {
-				throw std::runtime_error("Forward Renderer depth stencil texture create failed\n");
+				throw std::runtime_error("Forward Renderer depth stencil texture create failed");
 			}
 
 			auto backbuffers = m_pDeviceContext->getBackbuffers();
@@ -186,7 +462,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			if (VK_FAILED(vkCreateSampler(m_pDeviceContext->device, &shadowmapSamplerCreateInfo, nullptr, &m_shadowmapSampler))
 				|| VK_FAILED(vkCreateSampler(m_pDeviceContext->device, &textureSamplerCreateInfo, nullptr, &m_textureSampler)))
 			{
-				throw std::runtime_error("Forward Renderer immutable sampler create failed\n");
+				throw std::runtime_error("Forward Renderer immutable sampler create failed");
 			}
 		}
 
@@ -199,14 +475,42 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			cameraDataBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 			cameraDataBinding.pImmutableSamplers = nullptr;
 
+			VkDescriptorSetLayoutBinding sunLightDataBinding{};
+			sunLightDataBinding.binding = 1;
+			sunLightDataBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			sunLightDataBinding.descriptorCount = 1;
+			sunLightDataBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+			sunLightDataBinding.pImmutableSamplers = nullptr;
+
+			VkDescriptorSetLayoutBinding lightBufferBinding{};
+			lightBufferBinding.binding = 2;
+			lightBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			lightBufferBinding.descriptorCount = 1;
+			lightBufferBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+			lightBufferBinding.pImmutableSamplers = nullptr;
+
+			std::vector<VkSampler> textureSamplers(Scene::MaxTextures, m_textureSampler);
 			VkDescriptorSetLayoutBinding textureArrayBinding{};
-			textureArrayBinding.binding = 1;
+			textureArrayBinding.binding = 3;
 			textureArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			textureArrayBinding.descriptorCount = Scene::MaxTextures;
-			textureArrayBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-			textureArrayBinding.pImmutableSamplers = nullptr;
+			textureArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+			textureArrayBinding.pImmutableSamplers = textureSamplers.data();
 
-			VkDescriptorSetLayoutBinding sceneDataBindings[] = { cameraDataBinding, textureArrayBinding, };
+			VkDescriptorSetLayoutBinding sunShadowMapBinding{};
+			sunShadowMapBinding.binding = 4;
+			sunShadowMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			sunShadowMapBinding.descriptorCount = 1;
+			sunShadowMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+			sunShadowMapBinding.pImmutableSamplers = &m_shadowmapSampler;
+
+			VkDescriptorSetLayoutBinding sceneDataBindings[] = {
+				cameraDataBinding,
+				sunLightDataBinding,
+				lightBufferBinding,
+				textureArrayBinding,
+				sunShadowMapBinding,
+			};
 			VkDescriptorSetLayoutCreateInfo sceneDataSetLayout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 			sceneDataSetLayout.flags = 0;
 			sceneDataSetLayout.bindingCount = static_cast<uint32_t>(std::size(sceneDataBindings));
@@ -241,7 +545,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			if (VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &sceneDataSetLayout, nullptr, &m_sceneDataSetLayout))
 				|| VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &materialDataSetLayout, nullptr, &m_materialDataSetLayout))
 				|| VK_FAILED(vkCreateDescriptorSetLayout(m_pDeviceContext->device, &objectDataSetLayout, nullptr, &m_objectDataSetLayout))) {
-				throw std::runtime_error("Forward Renderer forward descriptor set layout create failed\n");
+				throw std::runtime_error("Forward Renderer forward descriptor set layout create failed");
 			}
 		}
 
@@ -256,7 +560,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
 			if (VK_FAILED(vkCreatePipelineLayout(m_pDeviceContext->device, &pipelineLayoutCreateInfo, nullptr, &m_forwardPipelineLayout))) {
-				throw std::runtime_error("Forward Renderer forward pipeline layout create failed\n");
+				throw std::runtime_error("Forward Renderer forward pipeline layout create failed");
 			}
 		}
 
@@ -266,7 +570,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			std::vector<uint32_t> forwardFragCode{};
 			if (!readShaderFile("forward.vert.spv", forwardVertCode)
 				|| !readShaderFile("forward.frag.spv", forwardFragCode)) {
-				throw std::runtime_error("Forward Renderer shader file read failed (forward opaque)\n");
+				throw std::runtime_error("Forward Renderer shader file read failed (forward opaque)");
 			}
 
 			VkShaderModuleCreateInfo forwardVertCreateInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
@@ -283,7 +587,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			VkShaderModule forwardFragModule = VK_NULL_HANDLE;
 			if (VK_FAILED(vkCreateShaderModule(m_pDeviceContext->device, &forwardVertCreateInfo, nullptr, &forwardVertModule))
 				|| VK_FAILED(vkCreateShaderModule(m_pDeviceContext->device, &forwardFragCreateInfo, nullptr, &forwardFragModule))) {
-				throw std::runtime_error("Forward Renderer shader module create failed (forward opaque)\n");
+				throw std::runtime_error("Forward Renderer shader module create failed (forward opaque)");
 			}
 
 			VkPipelineShaderStageCreateInfo forwardVertStage{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
@@ -423,7 +727,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			forwardOpaqueCreateInfo.basePipelineIndex = 0;
 
 			if (VK_FAILED(vkCreateGraphicsPipelines(m_pDeviceContext->device, VK_NULL_HANDLE, 1, &forwardOpaqueCreateInfo, nullptr, &m_forwardOpaquePipeline))) {
-				throw std::runtime_error("Forward Renderer forward pipeline create failed\n");
+				throw std::runtime_error("Forward Renderer forward pipeline create failed");
 			}
 
 			vkDestroyShaderModule(m_pDeviceContext->device, forwardFragModule, nullptr);
@@ -433,15 +737,19 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 
 	// Create uniform buffers
 	{
-		size_t sceneDataBufferSize = sizeof(UniformCameraData);
+		size_t cameraDataBufferSize = sizeof(UniformCameraData);
+		size_t sunLightDataBufferSize = sizeof(UniformSunLightData);
+		size_t lightDataBufferSize = sizeof(SSBOLightEntry);
 		size_t materialBufferSize = sizeof(UniformMaterialData);
 		size_t objectBufferSize = sizeof(UniformObjectData);
 
-		m_sceneDataBuffer = m_pDeviceContext->createBuffer(sceneDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		m_cameraDataBuffer = m_pDeviceContext->createBuffer(cameraDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		m_sunLightDataBuffer = m_pDeviceContext->createBuffer(sunLightDataBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		m_lightBuffer = m_pDeviceContext->createBuffer(lightDataBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 		m_materialDataBuffer = m_pDeviceContext->createBuffer(materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 		m_objectDataBuffer = m_pDeviceContext->createBuffer(objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-		if (m_sceneDataBuffer == nullptr || m_materialDataBuffer == nullptr || m_objectDataBuffer == nullptr) {
-			throw std::runtime_error("Forward Renderer uniform buffer create failed");
+		if (m_cameraDataBuffer == nullptr || m_lightBuffer == nullptr || m_materialDataBuffer == nullptr || m_objectDataBuffer == nullptr) {
+			throw std::runtime_error("Forward Renderer forward shader buffer create failed");
 		}
 	}
 
@@ -491,31 +799,53 @@ ForwardRenderer::~ForwardRenderer()
 {
 	ImGui_ImplVulkan_Shutdown();
 
-	m_objectSets.clear();
-	m_materialSets.clear();
-	m_sceneSet = VK_NULL_HANDLE;
-	vkDestroyDescriptorPool(m_pDeviceContext->device, m_descriptorPool, nullptr);
-
-	vkDestroyDescriptorPool(m_pDeviceContext->device, m_guiDescriptorPool, nullptr);
-
-	// Destroy forward rendering pipeline
-	vkDestroyPipeline(m_pDeviceContext->device, m_forwardOpaquePipeline, nullptr);
-	vkDestroyPipelineLayout(m_pDeviceContext->device, m_forwardPipelineLayout, nullptr);
-
-	// Destroy layouts
-	vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_objectDataSetLayout, nullptr);
-	vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_materialDataSetLayout, nullptr);
-	vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_sceneDataSetLayout, nullptr);
-
-	// Destroy samplers
-	vkDestroySampler(m_pDeviceContext->device, m_textureSampler, nullptr);
-	vkDestroySampler(m_pDeviceContext->device, m_shadowmapSampler, nullptr);
-
 	// Destroy forward pass data
-	for (auto& framebuffer : m_forwardFramebuffers) {
-		vkDestroyFramebuffer(m_pDeviceContext->device, framebuffer, nullptr);
+	{
+		m_objectSets.clear();
+		m_materialSets.clear();
+		m_sceneSet = VK_NULL_HANDLE;
+		vkDestroyDescriptorPool(m_pDeviceContext->device, m_descriptorPool, nullptr);
+
+		vkDestroyDescriptorPool(m_pDeviceContext->device, m_guiDescriptorPool, nullptr);
+
+		// Destroy pipeline
+		vkDestroyPipeline(m_pDeviceContext->device, m_forwardOpaquePipeline, nullptr);
+		vkDestroyPipelineLayout(m_pDeviceContext->device, m_forwardPipelineLayout, nullptr);
+
+		// Destroy descriptor layouts
+		vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_objectDataSetLayout, nullptr);
+		vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_materialDataSetLayout, nullptr);
+		vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_sceneDataSetLayout, nullptr);
+
+		// Destroy samplers
+		vkDestroySampler(m_pDeviceContext->device, m_textureSampler, nullptr);
+		vkDestroySampler(m_pDeviceContext->device, m_shadowmapSampler, nullptr);
+
+		// Destroy framebuffers & attachments
+		for (auto& framebuffer : m_forwardFramebuffers) {
+			vkDestroyFramebuffer(m_pDeviceContext->device, framebuffer, nullptr);
+		}
+		vkDestroyRenderPass(m_pDeviceContext->device, m_forwardRenderPass, nullptr);
 	}
-	vkDestroyRenderPass(m_pDeviceContext->device, m_forwardRenderPass, nullptr);
+
+	// Destroy shadow map pass data
+	{
+		m_shadowMapObjectSets.clear();
+		m_shadowMapCameraSet = VK_NULL_HANDLE;
+		vkDestroyDescriptorPool(m_pDeviceContext->device, m_shadowMapDescriptorPool, nullptr);
+
+		// Destroy pipeline
+		vkDestroyPipeline(m_pDeviceContext->device, m_shadowMapPipeline, nullptr);
+		vkDestroyPipelineLayout(m_pDeviceContext->device, m_shadowMapPipelineLayout, nullptr);
+
+		// Destroy descriptor layouts
+		vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_shadowMapObjectDataSetLayout, nullptr);
+		vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_shadowMapCameraDataSetLayout, nullptr);
+
+		// Destroy framebuffers & attachments
+		vkDestroyFramebuffer(m_pDeviceContext->device, m_sunShadowMapFramebuffer, nullptr);
+		vkDestroyRenderPass(m_pDeviceContext->device, m_shadowMapRenderPass, nullptr);
+	}
 
 	// Destroy command data
 	m_pDeviceContext->destroyCommandContext(m_frameCommands);
@@ -541,7 +871,7 @@ bool ForwardRenderer::onResize(uint32_t width, uint32_t height)
 
 	// Create swap dependent resources
 	m_depthStencilTexture = m_pDeviceContext->createTexture(
-		VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+		VK_IMAGE_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
 		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_framebufferWidth, m_framebufferHeight, 1
 	);
 
@@ -574,51 +904,172 @@ bool ForwardRenderer::onResize(uint32_t width, uint32_t height)
 
 void ForwardRenderer::update(Scene const& scene)
 {
-	// Check uniform buffer sizes & recreate buffers if needed
-	size_t const materialBufferSize = scene.materials.size() * sizeof(UniformMaterialData);
-	size_t const objectBufferSize = scene.nodes.count * sizeof(UniformObjectData);
-	
-	if (materialBufferSize > m_materialDataBuffer->size())
-	{
-		m_materialDataBuffer = m_pDeviceContext->createBuffer(materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-		if (m_materialDataBuffer == nullptr) {
-			throw std::runtime_error("Forward Renderer update uniform material buffer resize failed\n");
-		}
-
-		printf("Forward Renderer material uniform resized: %zu bytes\n", m_materialDataBuffer->size());
+	// Calculate world space transforms for all nodes in scene
+	m_objectTransforms.resize(scene.nodes.count);
+	for (auto const& root : scene.rootNodes) {
+		SceneHelpers::calcWorldSpaceTransforms(scene, glm::identity<glm::mat4>(), m_objectTransforms, root);
 	}
 
-	if (objectBufferSize > m_objectDataBuffer->size())
+	// Set sun transform
+	// TODO(nemjit001): Adjust to be more robust, eventually add cascades
+	SceneRef const& camParent = scene.nodes.parentRef[scene.activeCamera];
+	glm::mat4 const& camParentTransform = (camParent == RefUnused) ? glm::identity<glm::mat4>() : m_objectTransforms[camParent];
+
+	glm::vec3 sunPosition = scene.nodes.transform[scene.activeCamera].position;
+	sunPosition += -scene.sun.direction() * 0.5F * SunShadowExtent.z; // Offset by half Z extent
+
+	glm::mat4 const sunProject = Camera::createOrtho(SunShadowExtent.x, SunShadowExtent.y, 1.0F, SunShadowExtent.z).matrix();
+	glm::mat4 const sunView = camParentTransform * glm::lookAt(sunPosition, sunPosition + scene.sun.direction(), UP); // TODO(nemjit001): Figure out right transform matrix for cam-following sun light
+
+	// Update shadow map pipeline state
 	{
-		m_objectDataBuffer = m_pDeviceContext->createBuffer(objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-		if (m_objectDataBuffer == nullptr) {
-			throw std::runtime_error("Forward Renderer update uniform object buffer resize failed\n");
+		// Gather object & draw data
+		std::vector<UniformShadowMapObjectData> objectBuffer;
+		objectBuffer.reserve(scene.nodes.count);
+		m_shadowMapDrawData.clear();
+		for (uint32_t i = 0; i < scene.nodes.count; i++)
+		{
+			if (scene.nodes.materialRef[i] != RefUnused && scene.nodes.meshRef[i] != RefUnused)
+			{
+				UniformShadowMapObjectData const objectData{
+					m_objectTransforms[i],
+				};
+
+				ShadowMapDraw const draw{
+					scene.nodes.meshRef[i], //< mesh index
+					static_cast<uint32_t>(objectBuffer.size()), //< object index
+				};
+
+				objectBuffer.push_back(objectData);
+				m_shadowMapDrawData.push_back(draw);
+			}
 		}
 
-		printf("Forward Renderer object uniform resized: %zu bytes\n", m_objectDataBuffer->size());
+		// Resize shader buffers if needed
+		size_t const objectBufferSize = objectBuffer.size() * sizeof(UniformShadowMapObjectData);
+		if (objectBufferSize > m_shadowMapObjectDataBuffer->size()) {
+			m_shadowMapObjectDataBuffer = m_pDeviceContext->createBuffer(objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+			if (m_shadowMapObjectDataBuffer == nullptr) {
+				throw std::runtime_error("Forward Renderer update uniform shadow map object buffer resize failed\n");
+			}
+
+			printf("Forward Renderer shadow map object uniform buffer resized: %zu bytes\n", m_shadowMapObjectDataBuffer->size());
+		}
+
+		// Upload shader data
+		UniformShadowMapCameraData const sunCameraData {
+			sunProject * sunView,
+		};
+
+		m_sunCameraDataBuffer->map();
+		memcpy(m_sunCameraDataBuffer->data(), &sunCameraData, m_sunCameraDataBuffer->size());
+		m_sunCameraDataBuffer->unmap();
+
+		if (objectBuffer.size() > 0)
+		{
+			m_shadowMapObjectDataBuffer->map();
+			memcpy(m_shadowMapObjectDataBuffer->data(), objectBuffer.data(), m_shadowMapObjectDataBuffer->size());
+			m_shadowMapObjectDataBuffer->unmap();
+		}
+
+		// Reset descriptor pool & reallocate descriptor sets
+		m_shadowMapObjectSets.resize(objectBuffer.size());
+		uint32_t requiredDescriptorSets = 1 + m_shadowMapObjectSets.size();
+		if (requiredDescriptorSets > m_maxShadowMapDescriptorSets)
+		{
+			m_maxShadowMapDescriptorSets = requiredDescriptorSets;
+
+			VkDescriptorPoolSize poolSizes[] = {
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * m_maxShadowMapDescriptorSets },
+			};
+
+			VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+			descriptorPoolCreateInfo.flags = 0;
+			descriptorPoolCreateInfo.maxSets = m_maxShadowMapDescriptorSets;
+			descriptorPoolCreateInfo.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
+			descriptorPoolCreateInfo.pPoolSizes = poolSizes;
+
+			vkDestroyDescriptorPool(m_pDeviceContext->device, m_shadowMapDescriptorPool, nullptr);
+			if (VK_FAILED(vkCreateDescriptorPool(m_pDeviceContext->device, &descriptorPoolCreateInfo, nullptr, &m_shadowMapDescriptorPool))) {
+				throw std::runtime_error("Forward Renderer update descriptor pool realloc failed");
+			}
+
+			printf("Forward Renderer update reallocated shadow map descriptor pool (%u sets)\n", m_maxShadowMapDescriptorSets);
+		}
+
+		vkResetDescriptorPool(m_pDeviceContext->device, m_shadowMapDescriptorPool, 0 /* no flags*/);
+		std::vector<VkDescriptorSetLayout> objectDescriptorSetLayouts(m_shadowMapObjectSets.size(), m_shadowMapObjectDataSetLayout);
+
+		VkDescriptorSetAllocateInfo smCameraSetAllocateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		smCameraSetAllocateInfo.descriptorPool = m_shadowMapDescriptorPool;
+		smCameraSetAllocateInfo.descriptorSetCount = 1;
+		smCameraSetAllocateInfo.pSetLayouts = &m_shadowMapCameraDataSetLayout;
+
+		if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &smCameraSetAllocateInfo, &m_shadowMapCameraSet))) {
+			throw std::runtime_error("Forward Renderer update scene data set alloc failed\n");
+		}
+
+		if (m_shadowMapObjectSets.size() > 0)
+		{
+			VkDescriptorSetAllocateInfo smObjectSetAllocateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+			smObjectSetAllocateInfo.descriptorPool = m_shadowMapDescriptorPool;
+			smObjectSetAllocateInfo.descriptorSetCount = static_cast<uint32_t>(m_shadowMapObjectSets.size());
+			smObjectSetAllocateInfo.pSetLayouts = objectDescriptorSetLayouts.data();
+
+			if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &smObjectSetAllocateInfo, m_shadowMapObjectSets.data()))) {
+				throw std::runtime_error("Forward Renderer update scene data set alloc failed\n");
+			}
+		}
+
+		// Update all descriptor sets
+		VkDescriptorBufferInfo cameraBufferInfo{};
+		cameraBufferInfo.buffer = m_sunCameraDataBuffer->handle();
+		cameraBufferInfo.offset = 0;
+		cameraBufferInfo.range = m_sunCameraDataBuffer->size();
+
+		VkWriteDescriptorSet cameraDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		cameraDataWrite.dstSet = m_shadowMapCameraSet;
+		cameraDataWrite.dstBinding = 0;
+		cameraDataWrite.dstArrayElement = 0;
+		cameraDataWrite.descriptorCount = 1;
+		cameraDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		cameraDataWrite.pBufferInfo = &cameraBufferInfo;
+		vkUpdateDescriptorSets(m_pDeviceContext->device, 1, &cameraDataWrite, 0, nullptr);
+
+		for (size_t objectIdx = 0; objectIdx < objectBuffer.size(); objectIdx++)
+		{
+			VkDescriptorBufferInfo objectBufferInfo{};
+			objectBufferInfo.buffer = m_shadowMapObjectDataBuffer->handle();
+			objectBufferInfo.offset = objectIdx * sizeof(UniformShadowMapObjectData);
+			objectBufferInfo.range = sizeof(UniformShadowMapObjectData);
+
+			VkWriteDescriptorSet objectDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+			objectDataWrite.dstSet = m_shadowMapObjectSets[objectIdx];
+			objectDataWrite.dstBinding = 0;
+			objectDataWrite.dstArrayElement = 0;
+			objectDataWrite.descriptorCount = 1;
+			objectDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			objectDataWrite.pBufferInfo = &objectBufferInfo;
+			vkUpdateDescriptorSets(m_pDeviceContext->device, 1, &objectDataWrite, 0, nullptr);
+		}
 	}
 
-	// Upload uniform camera data
-	Transform const& camTransform = scene.nodes.transform[scene.activeCamera];
-	Camera const& camera = scene.cameras[scene.nodes.cameraRef[scene.activeCamera]];
-	UniformCameraData const cameraData{
-		camTransform.position,
-		camera.matrix() * glm::lookAt(camTransform.position + camTransform.forward(), camTransform.position, UP),
-	};
-
-	m_sceneDataBuffer->map();
-	memcpy(m_sceneDataBuffer->data(), &cameraData, sizeof(UniformCameraData));
-	m_sceneDataBuffer->unmap();
-
-	// Upload uniform material data if it exists
-	if (scene.materials.size() > 0)
+	// Update forward pipeline state
 	{
-		m_materialDataBuffer->map();
-		UniformMaterialData* pMaterialData = reinterpret_cast<UniformMaterialData*>(m_materialDataBuffer->data());
-		size_t materialIdx = 0;
+		// Gather scene data buffer entries
+		std::vector<SSBOLightEntry> lightBuffer;
+		std::vector<UniformMaterialData> materialBuffer;
+		std::vector<UniformObjectData> objectBuffer;
+		std::vector<MeshDraw> draws;
+		lightBuffer.reserve(scene.nodes.count);
+		materialBuffer.reserve(scene.materials.size());
+		objectBuffer.reserve(scene.nodes.count);
+		draws.reserve(scene.nodes.count);
+
+		// Gather material data
 		for (auto const& material : scene.materials)
 		{
-			UniformMaterialData const uniformData{
+			UniformMaterialData const materialData{
 				material.defaultAlbedo,
 				material.defaultSpecular,
 				material.albedoTexture,
@@ -626,195 +1077,320 @@ void ForwardRenderer::update(Scene const& scene)
 				material.normalTexture
 			};
 
-
-			pMaterialData[materialIdx] = uniformData;
-			materialIdx++;
+			materialBuffer.push_back(materialData);
 		}
 
-		m_materialDataBuffer->unmap();
-	}
-
-	// Upload uniform object data if it exists
-	if (scene.nodes.count > 0)
-	{
-		m_objectTransforms.resize(scene.nodes.count);
-		for (auto const& root : scene.rootNodes) {
-			SceneHelpers::calcWorldSpaceTransforms(scene, glm::identity<glm::mat4>(), m_objectTransforms, root);
-		}
-
-		m_objectDataBuffer->map();
-		UniformObjectData* pObjectData = reinterpret_cast<UniformObjectData*>(m_objectDataBuffer->data());
-		size_t objectIdx = 0;
-		for (auto const& model : m_objectTransforms)
+		// Gather lights, objects, draws
+		for (uint32_t i = 0; i < scene.nodes.count; i++)
 		{
-			glm::mat4 const normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(model))));
-			UniformObjectData const uniformData{
-				model,
-				normal
-			};
+			if (scene.nodes.lightRef[i] != RefUnused)
+			{
+				Light const& light = scene.lights[scene.nodes.lightRef[i]];
+				SSBOLightEntry lightEntry{};
+				lightEntry.type = static_cast<uint32_t>(light.type);
+				lightEntry.color = light.color;
+				lightEntry.positionOrDirection = glm::vec3(0);
 
-			pObjectData[objectIdx] = uniformData;
-			objectIdx++;
+				switch (light.type)
+				{
+				case LightType::Undefined:
+					break;
+				case LightType::Directional:
+					lightEntry.positionOrDirection = glm::normalize(glm::vec3(glm::inverse(m_objectTransforms[i])[2]));
+					break;
+				case LightType::Point:
+					lightEntry.positionOrDirection = scene.nodes.transform[i].position;
+					break;
+				default:
+					break;
+				}
+
+				lightBuffer.push_back(lightEntry);
+			}
+
+			if (scene.nodes.materialRef[i] != RefUnused	&& scene.nodes.meshRef[i] != RefUnused)
+			{
+				glm::mat4 const model = m_objectTransforms[i];
+				glm::mat4 const normal = glm::mat4(glm::inverse(glm::transpose(glm::mat3(model))));
+
+				UniformObjectData const objectData{
+					model,
+					normal,
+				};
+
+				MeshDraw const draw{
+					scene.nodes.materialRef[i],
+					scene.nodes.meshRef[i],
+					static_cast<uint32_t>(objectBuffer.size()),
+				};
+
+				objectBuffer.push_back(objectData);
+				draws.push_back(draw);
+			}
 		}
 
-		m_objectDataBuffer->unmap();
-	}
+		// Check uniform buffer sizes & recreate buffers if needed
+		size_t const lightBufferSize = lightBuffer.size() * sizeof(SSBOLightEntry);
+		size_t const materialBufferSize = materialBuffer.size() * sizeof(UniformMaterialData);
+		size_t const objectBufferSize = objectBuffer.size() * sizeof(UniformObjectData);
 
-	// Size descriptor set arrays for this frame & recreate descriptor pool
-	m_materialSets.resize(scene.materials.size());
-	m_objectSets.resize(scene.nodes.count);
+		if (lightBufferSize > m_lightBuffer->size())
+		{
+			m_lightBuffer = m_pDeviceContext->createBuffer(lightBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+			if (m_lightBuffer == nullptr) {
+				throw std::runtime_error("Forward Renderer update uniform light buffer resize failed\n");
+			}
 
-	uint32_t requiredDescriptorSets = static_cast<uint32_t>(1 + m_materialSets.size() + m_objectSets.size());
-	if (requiredDescriptorSets > m_maxDescriptorSets) {
-		m_maxDescriptorSets = requiredDescriptorSets;
+			printf("Forward Renderer light storage buffer resized: %zu bytes\n", m_lightBuffer->size());
+		}
 
-		VkDescriptorPoolSize poolSizes[] = {
-			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * m_maxDescriptorSets },
-			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 * m_maxDescriptorSets },
+		if (materialBufferSize > m_materialDataBuffer->size())
+		{
+			m_materialDataBuffer = m_pDeviceContext->createBuffer(materialBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+			if (m_materialDataBuffer == nullptr) {
+				throw std::runtime_error("Forward Renderer update uniform material buffer resize failed\n");
+			}
+
+			printf("Forward Renderer material uniform buffer resized: %zu bytes\n", m_materialDataBuffer->size());
+		}
+
+		if (objectBufferSize > m_objectDataBuffer->size())
+		{
+			m_objectDataBuffer = m_pDeviceContext->createBuffer(objectBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+			if (m_objectDataBuffer == nullptr) {
+				throw std::runtime_error("Forward Renderer update uniform object buffer resize failed\n");
+			}
+
+			printf("Forward Renderer object uniform buffer resized: %zu bytes\n", m_objectDataBuffer->size());
+		}
+
+		// Upload shader data
+		glm::mat4 const& camTransform = m_objectTransforms[scene.activeCamera];
+		glm::mat4 const& camViewMatrix = glm::lookAt(Transform::getPosition(camTransform) + Transform::getForward(camTransform), Transform::getPosition(camTransform), UP);
+
+		Camera const& camera = scene.cameras[scene.nodes.cameraRef[scene.activeCamera]];
+		UniformCameraData const cameraData{
+			Transform::getPosition(camTransform),
+			camera.matrix() * camViewMatrix,
 		};
 
-		VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-		descriptorPoolCreateInfo.flags = 0;
-		descriptorPoolCreateInfo.maxSets = m_maxDescriptorSets;
-		descriptorPoolCreateInfo.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
-		descriptorPoolCreateInfo.pPoolSizes = poolSizes;
+		m_cameraDataBuffer->map();
+		memcpy(m_cameraDataBuffer->data(), &cameraData, sizeof(UniformCameraData));
+		m_cameraDataBuffer->unmap();
 
-		vkDestroyDescriptorPool(m_pDeviceContext->device, m_descriptorPool, nullptr);
-		if (VK_FAILED(vkCreateDescriptorPool(m_pDeviceContext->device, &descriptorPoolCreateInfo, nullptr, &m_descriptorPool))) {
-			throw std::runtime_error("Forward Renderer update descriptor pool realloc failed");
+		UniformSunLightData const sunLightData{
+			scene.sun.direction(),
+			scene.sun.color,
+			scene.sun.ambient,
+			sunProject * sunView,
+		};
+
+		m_sunLightDataBuffer->map();
+		memcpy(m_sunLightDataBuffer->data(), &sunLightData, sizeof(UniformSunLightData));
+		m_sunLightDataBuffer->unmap();
+
+		if (!lightBuffer.empty())
+		{
+			m_lightBuffer->map();
+			memcpy(m_lightBuffer->data(), lightBuffer.data(), m_lightBuffer->size());
+			m_lightBuffer->unmap();
 		}
 
-		printf("Forward Renderer update reallocated descriptor pool (%u sets)\n", m_maxDescriptorSets);
-	}
-
-	// Reallocate descriptor sets
-	// FIXME(nemjit001): It takes a lot of time to reallocate descriptor sets each frame, smarter reuse scheme might be useful here
-	vkResetDescriptorPool(m_pDeviceContext->device, m_descriptorPool, /* no flags */ 0);
-	std::vector<VkDescriptorSetLayout> const materialSetLayouts(m_materialSets.size(), m_materialDataSetLayout);
-	std::vector<VkDescriptorSetLayout> const objectSetLayouts(m_objectSets.size(), m_objectDataSetLayout);
-
-	VkDescriptorSetAllocateInfo sceneSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-	sceneSetAllocInfo.descriptorPool = m_descriptorPool;
-	sceneSetAllocInfo.descriptorSetCount = 1;
-	sceneSetAllocInfo.pSetLayouts = &m_sceneDataSetLayout;
-
-	if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &sceneSetAllocInfo, &m_sceneSet))) {
-		throw std::runtime_error("Forward Renderer update scene data set alloc failed\n");
-	}
-
-	if (m_materialSets.size() > 0)
-	{
-		VkDescriptorSetAllocateInfo materialSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-		materialSetAllocInfo.descriptorPool = m_descriptorPool;
-		materialSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_materialSets.size());
-		materialSetAllocInfo.pSetLayouts = materialSetLayouts.data();
-
-		if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &materialSetAllocInfo, m_materialSets.data()))) {
-			throw std::runtime_error("Forward Renderer update material descriptor set alloc failed");
-		}
-	}
-
-	if (m_objectSets.size() > 0)
-	{
-		VkDescriptorSetAllocateInfo objectSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-		objectSetAllocInfo.descriptorPool = m_descriptorPool;
-		objectSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_objectSets.size());
-		objectSetAllocInfo.pSetLayouts = objectSetLayouts.data();
-
-		if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &objectSetAllocInfo, m_objectSets.data()))) {
-			throw std::runtime_error("Forward Renderer update object descriptor set alloc failed");
-		}
-	}
-
-	// Update all descriptor sets in frame (scene data, texture array, material data, object data)
-	std::vector<VkDescriptorImageInfo> imageInfos{};
-	std::vector<VkDescriptorBufferInfo> bufferInfos{};
-	std::vector<VkWriteDescriptorSet> descriptorWrites{};
-	imageInfos.reserve(scene.textures.size());
-	bufferInfos.reserve(2 + scene.materials.size() + scene.nodes.count);
-	descriptorWrites.reserve(2 + scene.materials.size() + scene.nodes.count);
-
-	VkDescriptorBufferInfo cameraDataBufferInfo{};
-	cameraDataBufferInfo.buffer = m_sceneDataBuffer->handle();
-	cameraDataBufferInfo.offset = 0;
-	cameraDataBufferInfo.range = sizeof(UniformCameraData);
-	bufferInfos.emplace_back(cameraDataBufferInfo);
-
-	VkWriteDescriptorSet cameraDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-	cameraDataWrite.dstSet = m_sceneSet;
-	cameraDataWrite.dstBinding = 0;
-	cameraDataWrite.dstArrayElement = 0;
-	cameraDataWrite.descriptorCount = 1;
-	cameraDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	cameraDataWrite.pBufferInfo = &bufferInfos.back();
-	descriptorWrites.emplace_back(cameraDataWrite);
-
-	for (size_t textureIdx = 0; textureIdx < scene.textures.size(); textureIdx++)
-	{
-		VkDescriptorImageInfo textureImageInfo{};
-		textureImageInfo.sampler = m_textureSampler;
-		textureImageInfo.imageView = scene.textures[textureIdx]->view;
-		textureImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		imageInfos.emplace_back(textureImageInfo);
-		
-		VkWriteDescriptorSet textureWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		textureWrite.dstSet = m_sceneSet;
-		textureWrite.dstBinding = 1;
-		textureWrite.dstArrayElement = static_cast<uint32_t>(textureIdx);
-		textureWrite.descriptorCount = 1;
-		textureWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		textureWrite.pImageInfo = &imageInfos.back();
-		descriptorWrites.emplace_back(textureWrite);
-	}
-
-	for (size_t materialIdx = 0; materialIdx < scene.materials.size(); materialIdx++)
-	{
-		VkDescriptorBufferInfo materialDataBufferInfo{};
-		materialDataBufferInfo.buffer = m_materialDataBuffer->handle();
-		materialDataBufferInfo.offset = materialIdx * sizeof(UniformMaterialData);
-		materialDataBufferInfo.range = sizeof(UniformMaterialData);
-		bufferInfos.emplace_back(materialDataBufferInfo);
-
-		VkWriteDescriptorSet materialDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		materialDataWrite.dstSet = m_materialSets[materialIdx];
-		materialDataWrite.dstBinding = 0;
-		materialDataWrite.dstArrayElement = 0;
-		materialDataWrite.descriptorCount = 1;
-		materialDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		materialDataWrite.pBufferInfo = &bufferInfos.back();
-		descriptorWrites.emplace_back(materialDataWrite);
-	}
-
-	for (size_t nodeIdx = 0; nodeIdx < scene.nodes.count; nodeIdx++)
-	{
-		VkDescriptorBufferInfo objectDataBufferInfo{};
-		objectDataBufferInfo.buffer = m_objectDataBuffer->handle();
-		objectDataBufferInfo.offset = nodeIdx * sizeof(UniformObjectData);
-		objectDataBufferInfo.range = sizeof(UniformObjectData);
-		bufferInfos.emplace_back(objectDataBufferInfo);
-
-		VkWriteDescriptorSet objectDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		objectDataWrite.dstSet = m_objectSets[nodeIdx];
-		objectDataWrite.dstBinding = 0;
-		objectDataWrite.dstArrayElement = 0;
-		objectDataWrite.descriptorCount = 1;
-		objectDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		objectDataWrite.pBufferInfo = &bufferInfos.back();
-		descriptorWrites.emplace_back(objectDataWrite);
-	}
-	vkUpdateDescriptorSets(m_pDeviceContext->device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
-
-	// Sort object draws by material to reduce state changes in draw
-	m_drawData.clear();
-	for (uint32_t nodeIdx = 0; nodeIdx < scene.nodes.count; nodeIdx++)
-	{
-		SceneRef const meshRef = scene.nodes.meshRef[nodeIdx];
-		SceneRef const materialRef = scene.nodes.materialRef[nodeIdx];
-		if (meshRef == RefUnused || materialRef == RefUnused) {
-			continue;
+		if (!materialBuffer.empty())
+		{
+			m_materialDataBuffer->map();
+			memcpy(m_materialDataBuffer->data(), materialBuffer.data(), m_materialDataBuffer->size());
+			m_materialDataBuffer->unmap();
 		}
 
-		m_drawData[materialRef].emplace_back(nodeIdx);
+		if (!objectBuffer.empty())
+		{
+			m_objectDataBuffer->map();
+			memcpy(m_objectDataBuffer->data(), objectBuffer.data(), m_objectDataBuffer->size());
+			m_objectDataBuffer->unmap();
+		}
+
+		// Size descriptor set arrays for this frame & reset descriptor pool
+		m_materialSets.resize(materialBuffer.size());
+		m_objectSets.resize(objectBuffer.size());
+
+		// required = scene + materials[] + objects[]
+		uint32_t requiredDescriptorSets = static_cast<uint32_t>(1 + m_materialSets.size() + m_objectSets.size());
+		if (requiredDescriptorSets > m_maxDescriptorSets) {
+			m_maxDescriptorSets = requiredDescriptorSets;
+
+			VkDescriptorPoolSize poolSizes[] = {
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * m_maxDescriptorSets },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 * m_maxDescriptorSets },
+				{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 * m_maxDescriptorSets },
+			};
+
+			VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+			descriptorPoolCreateInfo.flags = 0;
+			descriptorPoolCreateInfo.maxSets = m_maxDescriptorSets;
+			descriptorPoolCreateInfo.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
+			descriptorPoolCreateInfo.pPoolSizes = poolSizes;
+
+			vkDestroyDescriptorPool(m_pDeviceContext->device, m_descriptorPool, nullptr);
+			if (VK_FAILED(vkCreateDescriptorPool(m_pDeviceContext->device, &descriptorPoolCreateInfo, nullptr, &m_descriptorPool))) {
+				throw std::runtime_error("Forward Renderer update descriptor pool realloc failed");
+			}
+
+			printf("Forward Renderer update reallocated descriptor pool (%u sets)\n", m_maxDescriptorSets);
+		}
+
+		// Reallocate descriptor sets
+		// FIXME(nemjit001): It takes a lot of time to reallocate descriptor sets each frame, smarter reuse scheme might be useful here
+		vkResetDescriptorPool(m_pDeviceContext->device, m_descriptorPool, /* no flags */ 0);
+		std::vector<VkDescriptorSetLayout> const materialSetLayouts(m_materialSets.size(), m_materialDataSetLayout);
+		std::vector<VkDescriptorSetLayout> const objectSetLayouts(m_objectSets.size(), m_objectDataSetLayout);
+
+		VkDescriptorSetAllocateInfo sceneSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		sceneSetAllocInfo.descriptorPool = m_descriptorPool;
+		sceneSetAllocInfo.descriptorSetCount = 1;
+		sceneSetAllocInfo.pSetLayouts = &m_sceneDataSetLayout;
+
+		if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &sceneSetAllocInfo, &m_sceneSet))) {
+			throw std::runtime_error("Forward Renderer update scene data set alloc failed\n");
+		}
+
+		if (m_materialSets.size() > 0)
+		{
+			VkDescriptorSetAllocateInfo materialSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+			materialSetAllocInfo.descriptorPool = m_descriptorPool;
+			materialSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_materialSets.size());
+			materialSetAllocInfo.pSetLayouts = materialSetLayouts.data();
+
+			if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &materialSetAllocInfo, m_materialSets.data()))) {
+				throw std::runtime_error("Forward Renderer update material descriptor set alloc failed");
+			}
+		}
+
+		if (m_objectSets.size() > 0)
+		{
+			VkDescriptorSetAllocateInfo objectSetAllocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+			objectSetAllocInfo.descriptorPool = m_descriptorPool;
+			objectSetAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_objectSets.size());
+			objectSetAllocInfo.pSetLayouts = objectSetLayouts.data();
+
+			if (VK_FAILED(vkAllocateDescriptorSets(m_pDeviceContext->device, &objectSetAllocInfo, m_objectSets.data()))) {
+				throw std::runtime_error("Forward Renderer update object descriptor set alloc failed");
+			}
+		}
+
+		// Update all descriptor sets in frame (scene data, texture array, material data, object data)
+		VkDescriptorBufferInfo cameraDataBufferInfo{};
+		cameraDataBufferInfo.buffer = m_cameraDataBuffer->handle();
+		cameraDataBufferInfo.offset = 0;
+		cameraDataBufferInfo.range = m_cameraDataBuffer->size();
+
+		VkWriteDescriptorSet cameraDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		cameraDataWrite.dstSet = m_sceneSet;
+		cameraDataWrite.dstBinding = 0;
+		cameraDataWrite.dstArrayElement = 0;
+		cameraDataWrite.descriptorCount = 1;
+		cameraDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		cameraDataWrite.pBufferInfo = &cameraDataBufferInfo;
+		vkUpdateDescriptorSets(m_pDeviceContext->device, 1, &cameraDataWrite, 0, nullptr);
+
+		VkDescriptorBufferInfo sunLightDataBufferInfo{};
+		sunLightDataBufferInfo.buffer = m_sunLightDataBuffer->handle();
+		sunLightDataBufferInfo.offset = 0;
+		sunLightDataBufferInfo.range = m_sunLightDataBuffer->size();
+
+		VkWriteDescriptorSet sunLightDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		sunLightDataWrite.dstSet = m_sceneSet;
+		sunLightDataWrite.dstBinding = 1;
+		sunLightDataWrite.dstArrayElement = 0;
+		sunLightDataWrite.descriptorCount = 1;
+		sunLightDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		sunLightDataWrite.pBufferInfo = &sunLightDataBufferInfo;
+		vkUpdateDescriptorSets(m_pDeviceContext->device, 1, &sunLightDataWrite, 0, nullptr);
+
+		VkDescriptorBufferInfo lightBufferInfo{};
+		lightBufferInfo.buffer = m_lightBuffer->handle();
+		lightBufferInfo.offset = 0;
+		lightBufferInfo.range = m_lightBuffer->size();
+
+		VkWriteDescriptorSet lightBufferWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		lightBufferWrite.dstSet = m_sceneSet;
+		lightBufferWrite.dstBinding = 2;
+		lightBufferWrite.dstArrayElement = 0;
+		lightBufferWrite.descriptorCount = 1;
+		lightBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		lightBufferWrite.pBufferInfo = &lightBufferInfo;
+		vkUpdateDescriptorSets(m_pDeviceContext->device, 1, &lightBufferWrite, 0, nullptr);
+
+		for (size_t textureIdx = 0; textureIdx < scene.textures.size(); textureIdx++)
+		{
+			VkDescriptorImageInfo textureImageInfo{};
+			textureImageInfo.sampler = VK_NULL_HANDLE; //< Uses immutable sampler
+			textureImageInfo.imageView = scene.textures[textureIdx]->view;
+			textureImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+			VkWriteDescriptorSet textureWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+			textureWrite.dstSet = m_sceneSet;
+			textureWrite.dstBinding = 3;
+			textureWrite.dstArrayElement = static_cast<uint32_t>(textureIdx);
+			textureWrite.descriptorCount = 1;
+			textureWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			textureWrite.pImageInfo = &textureImageInfo;
+			vkUpdateDescriptorSets(m_pDeviceContext->device, 1, &textureWrite, 0, nullptr);
+		}
+
+		VkDescriptorImageInfo sunShadowMapImageInfo{};
+		sunShadowMapImageInfo.sampler = VK_NULL_HANDLE; //< Uses immutable sampler
+		sunShadowMapImageInfo.imageView = m_sunShadowMap->view;
+		sunShadowMapImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		VkWriteDescriptorSet sunShadowMapWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		sunShadowMapWrite.dstSet = m_sceneSet;
+		sunShadowMapWrite.dstBinding = 4;
+		sunShadowMapWrite.dstArrayElement = 0;
+		sunShadowMapWrite.descriptorCount = 1;
+		sunShadowMapWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		sunShadowMapWrite.pImageInfo = &sunShadowMapImageInfo;
+		vkUpdateDescriptorSets(m_pDeviceContext->device, 1, &sunShadowMapWrite, 0, nullptr);
+
+		for (size_t materialIdx = 0; materialIdx < materialBuffer.size(); materialIdx++)
+		{
+			VkDescriptorBufferInfo materialDataBufferInfo{};
+			materialDataBufferInfo.buffer = m_materialDataBuffer->handle();
+			materialDataBufferInfo.offset = materialIdx * sizeof(UniformMaterialData);
+			materialDataBufferInfo.range = sizeof(UniformMaterialData);
+
+			VkWriteDescriptorSet materialDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+			materialDataWrite.dstSet = m_materialSets[materialIdx];
+			materialDataWrite.dstBinding = 0;
+			materialDataWrite.dstArrayElement = 0;
+			materialDataWrite.descriptorCount = 1;
+			materialDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			materialDataWrite.pBufferInfo = &materialDataBufferInfo;
+			vkUpdateDescriptorSets(m_pDeviceContext->device, 1, &materialDataWrite, 0, nullptr);
+		}
+
+		for (size_t objectIdx = 0; objectIdx < objectBuffer.size(); objectIdx++)
+		{
+			VkDescriptorBufferInfo objectDataBufferInfo{};
+			objectDataBufferInfo.buffer = m_objectDataBuffer->handle();
+			objectDataBufferInfo.offset = objectIdx * sizeof(UniformObjectData);
+			objectDataBufferInfo.range = sizeof(UniformObjectData);
+
+			VkWriteDescriptorSet objectDataWrite{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+			objectDataWrite.dstSet = m_objectSets[objectIdx];
+			objectDataWrite.dstBinding = 0;
+			objectDataWrite.dstArrayElement = 0;
+			objectDataWrite.descriptorCount = 1;
+			objectDataWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			objectDataWrite.pBufferInfo = &objectDataBufferInfo;
+			vkUpdateDescriptorSets(m_pDeviceContext->device, 1, &objectDataWrite, 0, nullptr);
+		}
+
+		// Sort mesh draws by material to reduce state changes in draw loop
+		m_forwardDrawData.clear();
+		for (auto const& draw : draws) {
+			m_forwardDrawData[draw.material].emplace_back(draw);
+		}
 	}
 }
 
@@ -824,6 +1400,55 @@ void ForwardRenderer::render(Scene const& scene)
 	frameBeginInfo.flags = 0;
 	frameBeginInfo.pInheritanceInfo = nullptr;
 	vkBeginCommandBuffer(m_frameCommands.handle, &frameBeginInfo);
+
+	// Render shadow mapping pass
+	{
+		VkClearValue clearValues[] = {
+			VkClearValue{{ 1.0F, 0x00 }},
+		};
+
+		VkRenderPassBeginInfo shadowMapPassBeginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+		shadowMapPassBeginInfo.renderPass = m_shadowMapRenderPass;
+		shadowMapPassBeginInfo.framebuffer = m_sunShadowMapFramebuffer;
+		shadowMapPassBeginInfo.renderArea = VkRect2D{ { 0, 0 }, { SunShadowMapResolutionX, SunShadowMapResolutionY } };
+		shadowMapPassBeginInfo.clearValueCount = static_cast<uint32_t>(std::size(clearValues));
+		shadowMapPassBeginInfo.pClearValues = clearValues;
+		vkCmdBeginRenderPass(m_frameCommands.handle, &shadowMapPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+		
+		// Set viewport & scissor
+		float viewportWidth = static_cast<float>(SunShadowMapResolutionX);
+		float viewportHeight = static_cast<float>(SunShadowMapResolutionY);
+		VkViewport viewport = { 0.0F, 0.0F, viewportWidth, viewportHeight, 0.0F, 1.0F };
+		VkRect2D scissor = { { 0, 0 }, { SunShadowMapResolutionX, SunShadowMapResolutionY } };
+		vkCmdSetViewport(m_frameCommands.handle, 0, 1, &viewport);
+		vkCmdSetScissor(m_frameCommands.handle, 0, 1, &scissor);
+
+		// Render shadow mapping objects
+		vkCmdBindPipeline(m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowMapPipeline);
+		vkCmdBindDescriptorSets( // Bind camera data set
+			m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowMapPipelineLayout,
+			0, 1, &m_shadowMapCameraSet,
+			0, nullptr
+		);
+
+		for (auto const& draw : m_shadowMapDrawData)
+		{
+			vkCmdBindDescriptorSets( // Bind object data set
+				m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_shadowMapPipelineLayout,
+				1, 1, &m_shadowMapObjectSets[draw.objectIndex],
+				0, nullptr
+			);
+
+			std::shared_ptr<Mesh> const& mesh = scene.meshes[draw.mesh];
+			VkBuffer vertexBuffers[] = { mesh->vertexBuffer->handle(), };
+			VkDeviceSize const offsets[] = { 0, };
+			vkCmdBindVertexBuffers(m_frameCommands.handle, 0, static_cast<uint32_t>(std::size(vertexBuffers)), vertexBuffers, offsets);
+			vkCmdBindIndexBuffer(m_frameCommands.handle, mesh->indexBuffer->handle(), 0, VK_INDEX_TYPE_UINT32);
+			vkCmdDrawIndexed(m_frameCommands.handle, mesh->indexCount, 1, 0, 0, 0);
+		}
+
+		vkCmdEndRenderPass(m_frameCommands.handle);
+	}
 
 	// Render forward pass
 	{
@@ -858,7 +1483,7 @@ void ForwardRenderer::render(Scene const& scene)
 			0, nullptr
 		);
 
-		for (auto const& kvp : m_drawData)
+		for (auto const& kvp : m_forwardDrawData)
 		{
 			uint32_t materialIdx = kvp.first;
 			vkCmdBindDescriptorSets( // Bind material data set
@@ -867,18 +1492,15 @@ void ForwardRenderer::render(Scene const& scene)
 				0, nullptr
 			);
 
-			for (uint32_t nodeIdx : kvp.second)
+			for (MeshDraw const& draw : kvp.second)
 			{
 				vkCmdBindDescriptorSets( // Bind object data set
 					m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_forwardPipelineLayout,
-					2, 1, &m_objectSets[nodeIdx],
+					2, 1, &m_objectSets[draw.objectIndex],
 					0, nullptr
 				);
 
-				SceneRef const meshRef = scene.nodes.meshRef[nodeIdx];
-				assert(meshRef != RefUnused);
-
-				std::shared_ptr<Mesh> const& mesh = scene.meshes[meshRef];
+				std::shared_ptr<Mesh> const& mesh = scene.meshes[draw.mesh];
 				VkBuffer vertexBuffers[] = { mesh->vertexBuffer->handle(), };
 				VkDeviceSize const offsets[] = { 0, };
 				vkCmdBindVertexBuffers(m_frameCommands.handle, 0, static_cast<uint32_t>(std::size(vertexBuffers)), vertexBuffers, offsets);

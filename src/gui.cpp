@@ -17,13 +17,11 @@ namespace GUI
             ImGui::DragFloat4("Rotation", &transform.rotation[0], 0.1F); // FIXME(nemjit001): some good quat rotation pls
             ImGui::DragFloat3("Scale", &transform.scale[0], 0.1F);
 
-            //ImGui::Text("Position: %8.2f %8.2f %8.2f", transform.position.x, transform.position.y, transform.position.z);
-            //ImGui::Text("Rotation: %8.2f %8.2f %8.2f %8.2f", transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w);
-            //ImGui::Text("Scale:    %8.2f %8.2f %8.2f", transform.scale.x, transform.scale.y, transform.scale.z);
-
             ImGui::SeparatorText("Scene Refs");
+            ImGui::Text("Parent:   %d", scene.nodes.parentRef[node]);
             ImGui::Text("Camera:   %d", scene.nodes.cameraRef[node]);
             ImGui::Text("Mesh:     %d", scene.nodes.meshRef[node]);
+            ImGui::Text("Light:    %d", scene.nodes.lightRef[node]);
             ImGui::Text("Material: %d", scene.nodes.materialRef[node]);
 
             ImGui::SeparatorText("Children");

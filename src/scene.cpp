@@ -1,8 +1,21 @@
 #include "scene.hpp"
 
 #include "camera.hpp"
+#include "light.hpp"
 #include "mesh.hpp"
 #include "render_backend/texture.hpp"
+
+glm::vec3 Sun::direction() const
+{
+    float const azimuthRad = glm::radians(azimuth);
+    float const elevationRad = glm::radians(90.0F + zenith);
+
+    return glm::normalize(glm::vec3(
+        glm::cos(azimuthRad) * glm::sin(elevationRad),
+        glm::cos(elevationRad),
+        glm::sin(azimuthRad) * glm::sin(elevationRad)
+    ));
+}
 
 SceneRef Scene::addCamera(Camera const& camera)
 {
@@ -30,6 +43,13 @@ SceneRef Scene::addTexture(std::shared_ptr<Texture> texture)
     return ref;
 }
 
+SceneRef Scene::addLight(Light const& light)
+{
+    SceneRef ref = static_cast<SceneRef>(lights.size());
+    lights.push_back(light);
+    return ref;
+}
+
 SceneRef Scene::addMaterial(Material const& material)
 {
     SceneRef ref = static_cast<SceneRef>(materials.size());
@@ -50,6 +70,7 @@ SceneRef Scene::createChildNode(SceneRef const& parent, std::string const& name,
     assert(parent != RefUnused);
 
     SceneRef ref = createNode(name, transform);
+    nodes.parentRef[ref] = parent;
     nodes.children[parent].emplace_back(ref);
     return ref;
 }
@@ -62,6 +83,7 @@ void Scene::clear()
     nodes.cameraRef.clear();
 
     materials.clear();
+    lights.clear();
     textures.clear();
     meshes.clear();
 
@@ -82,8 +104,10 @@ SceneRef Scene::createNode(std::string const& name, Transform const& transform)
     SceneRef ref = static_cast<SceneRef>(nodes.count);
     nodes.name.push_back(name);
     nodes.transform.push_back(transform);
+    nodes.parentRef.emplace_back(RefUnused);
     nodes.cameraRef.push_back(RefUnused);
     nodes.meshRef.push_back(RefUnused);
+    nodes.lightRef.push_back(RefUnused);
     nodes.materialRef.push_back(RefUnused);
     nodes.children.emplace_back();
     nodes.count++;
@@ -93,7 +117,9 @@ SceneRef Scene::createNode(std::string const& name, Transform const& transform)
         && nodes.count == nodes.transform.size()
         && nodes.count == nodes.cameraRef.size()
         && nodes.count == nodes.meshRef.size()
+        && nodes.count == nodes.lightRef.size()
         && nodes.count == nodes.materialRef.size()
+        && nodes.count == nodes.parentRef.size()
         && nodes.count == nodes.children.size()
     );
 

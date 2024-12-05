@@ -1,6 +1,8 @@
 #version 450
 #pragma shader_stage(vertex)
 
+#include "forward.uniforms.glsl.h"
+
 layout(location = 0) in vec3 v_Position;
 layout(location = 1) in vec3 v_Color;
 layout(location = 2) in vec3 v_Normal;
@@ -14,30 +16,6 @@ layout(location = 0) out FS_IN
 	vec2 o_TexCoord;
 	mat3 o_TBN;
 };
-
-//-- uniform data --//
-
-layout(set = 0, binding = 0) uniform CAMERA_DATA
-{
-	vec3 position;
-	mat4 matrix;
-} camera;
-layout(set = 0, binding = 1) uniform sampler2D textureMaps[];
-
-layout(set = 1, binding = 0) uniform MATERIAL_DATA
-{
-	vec3 albedo;
-	vec3 specular;
-	uint albedoMapIndex;
-	uint specularMapIndex;
-	uint normalMapIndex;
-} material;
-
-layout(set = 2, binding = 0) uniform OBJECT_DATA
-{
-	mat4 model;
-	mat4 normal;
-} object;
 
 void main()
 {

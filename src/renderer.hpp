@@ -52,11 +52,44 @@ public:
 	virtual void render(Scene const& scene) override;
 
 protected:
+	static constexpr uint32_t SunShadowMapResolutionX = 4096;
+	static constexpr uint32_t SunShadowMapResolutionY = 4096;
+	static constexpr glm::vec3 SunShadowExtent = glm::vec3(5'000.0F, 5'000.0F, 5'000.0F);
+
+	/// @brief Uniform shadow map camera parameters.
+	struct UniformShadowMapCameraData
+	{
+		alignas(16) glm::mat4 matrix;
+	};
+
+	/// @brief Uniform shadow map object parameters.
+	struct alignas(64) UniformShadowMapObjectData
+	{
+		alignas(16) glm::mat4 model;
+	};
+
 	/// @brief Uniform camera parameters, aligned for use on the GPU.
 	struct UniformCameraData
 	{
 		alignas(16) glm::vec3 position;
 		alignas(16) glm::mat4 matrix;
+	};
+
+	/// @brief Uniform sunlight parameters, aligned for use on the GPU.
+	struct UniformSunLightData
+	{
+		alignas(16) glm::vec3 direction;
+		alignas(16) glm::vec3 color;
+		alignas(16) glm::vec3 ambient;
+		alignas(16) glm::mat4 lightSpaceTransform;
+	};
+
+	/// @brief Shader storage light buffer entry.
+	struct SSBOLightEntry
+	{
+		alignas(4) uint32_t type;
+		alignas(16) glm::vec3 color;
+		alignas(16) glm::vec3 positionOrDirection;
 	};
 
 	/// @brief Uniform material parameters, aligned for use on the GPU.
@@ -77,48 +110,93 @@ protected:
 		alignas(16) glm::mat4 normal;
 	};
 
+	/// @brief Shadow map mesh draw in renderer, uses no materials.
+	struct ShadowMapDraw
+	{
+		uint32_t mesh;
+		uint32_t objectIndex;
+	};
+
+	/// @brief Mesh draw in renderer, associates a mesh with an object index and material
+	struct MeshDraw
+	{
+		uint32_t material;
+		uint32_t mesh;
+		uint32_t objectIndex;
+	};
+
 	//-- State tracking --//
 	uint32_t m_framebufferWidth = 0;
 	uint32_t m_framebufferHeight = 0;
+	std::vector<glm::mat4> m_objectTransforms{}; //< contains cached world space transforms for objects in scene
 
 	//-- Command recording --//
 	VkFence m_frameCommandsFinished = VK_NULL_HANDLE;
 	CommandContext m_frameCommands{};
 
-	//-- Forward render pass data --//
-	VkRenderPass m_forwardRenderPass = VK_NULL_HANDLE;
-	std::shared_ptr<Texture> m_depthStencilTexture = nullptr;
-	std::vector<VkFramebuffer> m_forwardFramebuffers{};
+	//-- Shadow mapping pass --//
+		//-- Shadow map render pass data --//
+		VkRenderPass m_shadowMapRenderPass = VK_NULL_HANDLE;
+		std::shared_ptr<Texture> m_sunShadowMap = nullptr;
+		VkFramebuffer m_sunShadowMapFramebuffer = VK_NULL_HANDLE;
 
-	//-- Samplers --//
-	VkSampler m_shadowmapSampler = VK_NULL_HANDLE;
-	VkSampler m_textureSampler = VK_NULL_HANDLE;
+		//-- Descriptor layouts --//
+		VkDescriptorSetLayout m_shadowMapCameraDataSetLayout = VK_NULL_HANDLE;
+		VkDescriptorSetLayout m_shadowMapObjectDataSetLayout = VK_NULL_HANDLE;
 
-	//-- Descriptor layouts --//
-	VkDescriptorSetLayout m_sceneDataSetLayout = VK_NULL_HANDLE;
-	VkDescriptorSetLayout m_materialDataSetLayout = VK_NULL_HANDLE;
-	VkDescriptorSetLayout m_objectDataSetLayout = VK_NULL_HANDLE;
+		//-- Shadow map pipeline --//
+		VkPipelineLayout m_shadowMapPipelineLayout = VK_NULL_HANDLE;
+		VkPipeline m_shadowMapPipeline = VK_NULL_HANDLE;
 
-	//-- Forward pipeline --//
-	VkPipelineLayout m_forwardPipelineLayout = VK_NULL_HANDLE;
-	VkPipeline m_forwardOpaquePipeline = VK_NULL_HANDLE;
+		//-- Shadow map shader buffers --//
+		std::shared_ptr<Buffer> m_sunCameraDataBuffer = nullptr;
+		std::shared_ptr<Buffer> m_shadowMapObjectDataBuffer = nullptr;
 
-	//-- Uniform buffers --//
-	std::shared_ptr<Buffer> m_sceneDataBuffer = nullptr; //< contains camera data.
-	std::shared_ptr<Buffer> m_materialDataBuffer = nullptr; //< contains all materials in the scene.
-	std::shared_ptr<Buffer> m_objectDataBuffer = nullptr; //< contains a node's world transforms (model + normal matrix).
-	std::vector<glm::mat4> m_objectTransforms{}; //< contains cached world space transforms
+		//-- Descriptor set management --//
+		uint32_t m_maxShadowMapDescriptorSets = 0;
+		VkDescriptorPool m_shadowMapDescriptorPool = VK_NULL_HANDLE;
+		VkDescriptorSet m_shadowMapCameraSet = VK_NULL_HANDLE;
+		std::vector<VkDescriptorSet> m_shadowMapObjectSets{};
 
-	//-- GUI state management --//
-	VkDescriptorPool m_guiDescriptorPool = VK_NULL_HANDLE;
+		//-- Optimized draw data for shadow mapping pass --//
+		std::vector<ShadowMapDraw> m_shadowMapDrawData{};
 
-	//-- Descriptor set management --//
-	uint32_t m_maxDescriptorSets = 0;
-	VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
-	VkDescriptorSet m_sceneSet = VK_NULL_HANDLE;
-	std::vector<VkDescriptorSet> m_materialSets{};
-	std::vector<VkDescriptorSet> m_objectSets{};
+	//-- Forward rendering pass --//
+		//-- Forward render pass data --//
+		VkRenderPass m_forwardRenderPass = VK_NULL_HANDLE;
+		std::shared_ptr<Texture> m_depthStencilTexture = nullptr;
+		std::vector<VkFramebuffer> m_forwardFramebuffers{};
 
-	//-- Optimized draw data --//
-	std::unordered_map<uint32_t, std::vector<uint32_t>> m_drawData; //< Material:Node[] mapping
+		//-- Samplers --//
+		VkSampler m_shadowmapSampler = VK_NULL_HANDLE;
+		VkSampler m_textureSampler = VK_NULL_HANDLE;
+
+		//-- Descriptor layouts --//
+		VkDescriptorSetLayout m_sceneDataSetLayout = VK_NULL_HANDLE;
+		VkDescriptorSetLayout m_materialDataSetLayout = VK_NULL_HANDLE;
+		VkDescriptorSetLayout m_objectDataSetLayout = VK_NULL_HANDLE;
+
+		//-- Forward pipeline --//
+		VkPipelineLayout m_forwardPipelineLayout = VK_NULL_HANDLE;
+		VkPipeline m_forwardOpaquePipeline = VK_NULL_HANDLE;
+
+		//-- Forward shader buffers --//
+		std::shared_ptr<Buffer> m_cameraDataBuffer = nullptr; //< contains camera data.
+		std::shared_ptr<Buffer> m_sunLightDataBuffer = nullptr; //< contains sun light data.
+		std::shared_ptr<Buffer> m_lightBuffer = nullptr; //< contains all lights in the scene.
+		std::shared_ptr<Buffer> m_materialDataBuffer = nullptr; //< contains all materials in the scene.
+		std::shared_ptr<Buffer> m_objectDataBuffer = nullptr; //< contains a node's world transforms (model + normal matrix).
+
+		//-- GUI state management --//
+		VkDescriptorPool m_guiDescriptorPool = VK_NULL_HANDLE;
+
+		//-- Descriptor set management --//
+		uint32_t m_maxDescriptorSets = 0;
+		VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
+		VkDescriptorSet m_sceneSet = VK_NULL_HANDLE;
+		std::vector<VkDescriptorSet> m_materialSets{};
+		std::vector<VkDescriptorSet> m_objectSets{};
+
+		//-- Optimized draw data for forward pass --//
+		std::unordered_map<uint32_t, std::vector<MeshDraw>> m_forwardDrawData;
 };
