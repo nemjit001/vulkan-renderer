@@ -161,7 +161,7 @@ protected:
 		//-- Optimized draw data for shadow mapping pass --//
 		std::vector<ShadowMapDraw> m_shadowMapDrawData{};
 
-	//-- Forawrd rendering pass --//
+	//-- Forward rendering pass --//
 		//-- Forward render pass data --//
 		VkRenderPass m_forwardRenderPass = VK_NULL_HANDLE;
 		std::shared_ptr<Texture> m_depthStencilTexture = nullptr;
