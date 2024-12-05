@@ -19,14 +19,17 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 	- [ ] Camera loading
 - [X] Lights
 	- [X] Sun light (directional)
-	- [X] Multiple point lights
+	- [X] Multiple lights
+		- [X] Point
+		- [X] Directional
+	- [ ] Shadow mapped lights
+- [ ] Skybox
 - [ ] Render pipeline
 	- [X] Shadow mapping pass
 	- [ ] Depth prepass
-	- [ ] Forward opaque pass
+	- [X] Forward opaque pass
 	- [ ] Transparency pass
 - [ ] PBR materials
-- [ ] Alpha tested geometry
 - [ ] Animations
 	- [ ] Linear skinning
 	- [ ] Blend shapes
