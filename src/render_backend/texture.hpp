@@ -36,6 +36,12 @@ public:
 	/// @return 
 	bool initDefaultView(VkImageViewType viewType, VkImageAspectFlags aspectMask);
 
+	/// @brief Calculate the mip levels required for a texture with a certain width and height.
+	/// @param width 
+	/// @param height 
+	/// @return 
+	static uint32_t calculateMipLevels(uint32_t width, uint32_t height);
+
 	// TODO(nemjit001): Make members private
 	VkDevice device = VK_NULL_HANDLE;
 	VkImage handle = VK_NULL_HANDLE;

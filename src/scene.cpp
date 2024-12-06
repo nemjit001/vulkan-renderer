@@ -89,14 +89,9 @@ void Scene::clear()
 
     cameras.clear();
     activeCamera = RefUnused;
-}
 
-bool Scene::empty() const
-{
-    return cameras.empty()
-        || meshes.empty()
-        || materials.empty()
-        || nodes.count == 0;
+    skybox.reset();
+    sun = Sun{};
 }
 
 SceneRef Scene::createNode(std::string const& name, Transform const& transform)

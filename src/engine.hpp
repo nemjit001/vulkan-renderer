@@ -5,6 +5,7 @@
 
 #include "camera_controller.hpp"
 #include "input.hpp"
+#include "scene.hpp"
 #include "timer.hpp"
 
 struct SDL_Window;
@@ -51,6 +52,8 @@ private:
 
 	std::unique_ptr<RenderDeviceContext> m_pDeviceContext = nullptr;
 	std::unique_ptr<IRenderer> m_pRenderer = nullptr;
+
+	Scene m_scene{};
 
 	Timer m_frameTimer{};
 	Timer m_cpuUpdateTimer{};

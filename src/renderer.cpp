@@ -363,6 +363,33 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			opaqueForwardPass.preserveAttachmentCount = 0;
 			opaqueForwardPass.pPreserveAttachments = nullptr;
 
+			VkAttachmentReference skyboxColorAttachment = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+			VkAttachmentReference skyboxDepthAttachment = { 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+			VkSubpassDescription skyboxPass{};
+			skyboxPass.flags = 0;
+			skyboxPass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+			skyboxPass.inputAttachmentCount = 0;
+			skyboxPass.pInputAttachments = nullptr;
+			skyboxPass.colorAttachmentCount = 1;
+			skyboxPass.pColorAttachments = &skyboxColorAttachment;
+			skyboxPass.pResolveAttachments = nullptr;
+			skyboxPass.pDepthStencilAttachment = &skyboxDepthAttachment;
+			skyboxPass.preserveAttachmentCount = 0;
+			skyboxPass.pPreserveAttachments = nullptr;
+
+			VkAttachmentReference GUIColorAttachment = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+			VkSubpassDescription GUIPass{};
+			GUIPass.flags = 0;
+			GUIPass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+			GUIPass.inputAttachmentCount = 0;
+			GUIPass.pInputAttachments = nullptr;
+			GUIPass.colorAttachmentCount = 1;
+			GUIPass.pColorAttachments = &skyboxColorAttachment;
+			GUIPass.pResolveAttachments = nullptr;
+			GUIPass.pDepthStencilAttachment = nullptr;
+			GUIPass.preserveAttachmentCount = 0;
+			GUIPass.pPreserveAttachments = nullptr;
+
 			VkSubpassDependency prevFrameDependency{};
 			prevFrameDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
 			prevFrameDependency.dstSubpass = 0;
@@ -371,9 +398,25 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			prevFrameDependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
 			prevFrameDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
+			VkSubpassDependency skyboxDependency{};
+			skyboxDependency.srcSubpass = 0;
+			skyboxDependency.dstSubpass = 1;
+			skyboxDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+			skyboxDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+			skyboxDependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+			skyboxDependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+
+			VkSubpassDependency GUIDependency{};
+			GUIDependency.srcSubpass = 1;
+			GUIDependency.dstSubpass = 2;
+			GUIDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			GUIDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			GUIDependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+			GUIDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
 			VkAttachmentDescription attachments[] = { colorAttachment, depthStencilAttachment, };
-			VkSubpassDescription subpasses[] = { opaqueForwardPass, };
-			VkSubpassDependency dependencies[] = { prevFrameDependency };
+			VkSubpassDescription subpasses[] = { opaqueForwardPass, skyboxPass, GUIPass, };
+			VkSubpassDependency dependencies[] = { prevFrameDependency, skyboxDependency, GUIDependency, };
 
 			VkRenderPassCreateInfo renderPassCreateInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
 			renderPassCreateInfo.flags = 0;
@@ -781,7 +824,7 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 		initInfo.ImageCount = m_pDeviceContext->backbufferCount();
 		initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 		initInfo.PipelineCache = VK_NULL_HANDLE;
-		initInfo.Subpass = 0;
+		initInfo.Subpass = 2;
 
 		auto loaderFunc = [](char const* pName, void* pUserData) {
 			(void)(pUserData);
@@ -793,11 +836,29 @@ ForwardRenderer::ForwardRenderer(RenderDeviceContext* pDeviceContext, uint32_t f
 			throw std::runtime_error("Forward Renderer ImGUI init failed");
 		}
 	}
+
+	// Create skybox rendering members
+	{
+		// TODO(nemjit001): create skybox members
+	}
 }
 
 ForwardRenderer::~ForwardRenderer()
 {
 	ImGui_ImplVulkan_Shutdown();
+
+	// Destroy skybox data
+	{
+		m_skyboxSet = VK_NULL_HANDLE;
+		vkDestroyDescriptorPool(m_pDeviceContext->device, m_skyboxDescriptorPool, nullptr);
+
+		vkDestroyPipeline(m_pDeviceContext->device, m_skyboxPipeline, nullptr);
+		vkDestroyPipelineLayout(m_pDeviceContext->device, m_skyboxPipelineLayout, nullptr);
+
+		vkDestroyDescriptorSetLayout(m_pDeviceContext->device, m_skyboxSetLayout, nullptr);
+
+		vkDestroySampler(m_pDeviceContext->device, m_skyboxSampler, nullptr);
+	}
 
 	// Destroy forward pass data
 	{
@@ -1392,6 +1453,11 @@ void ForwardRenderer::update(Scene const& scene)
 			m_forwardDrawData[draw.material].emplace_back(draw);
 		}
 	}
+
+	// Update skybox pipeline state
+	{
+		// TODO(nemjit001): Reallocate descriptor set -> only populate or render if skybox texture is set
+	}
 }
 
 void ForwardRenderer::render(Scene const& scene)
@@ -1450,7 +1516,7 @@ void ForwardRenderer::render(Scene const& scene)
 		vkCmdEndRenderPass(m_frameCommands.handle);
 	}
 
-	// Render forward pass
+	// Render forward passes
 	{
 		uint32_t const backbufferIndex = m_pDeviceContext->getCurrentBackbufferIndex();
 
@@ -1475,7 +1541,7 @@ void ForwardRenderer::render(Scene const& scene)
 		vkCmdSetViewport(m_frameCommands.handle, 0, 1, &viewport);
 		vkCmdSetScissor(m_frameCommands.handle, 0, 1, &scissor);
 
-		// Render forward opaque objects
+		// Forward opaque pass
 		vkCmdBindPipeline(m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_forwardOpaquePipeline);
 		vkCmdBindDescriptorSets( // Bind scene data set
 			m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_forwardPipelineLayout,
@@ -1509,6 +1575,25 @@ void ForwardRenderer::render(Scene const& scene)
 			}
 		}
 
+		// Skybox pass
+		vkCmdNextSubpass(m_frameCommands.handle, VK_SUBPASS_CONTENTS_INLINE);
+		if (scene.skybox != nullptr) // Only render if actually set in scene
+		{
+			vkCmdBindPipeline(m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_skyboxPipeline);
+			vkCmdBindDescriptorSets(m_frameCommands.handle, VK_PIPELINE_BIND_POINT_GRAPHICS, m_skyboxPipelineLayout,
+				0, 1, &m_skyboxSet,
+				0, nullptr
+			);
+
+			VkBuffer vertexBuffers[] = { m_skyboxMesh->vertexBuffer->handle(), };
+			VkDeviceSize const offsets[] = { 0, };
+			vkCmdBindVertexBuffers(m_frameCommands.handle, 0, static_cast<uint32_t>(std::size(vertexBuffers)), vertexBuffers, offsets);
+			vkCmdBindIndexBuffer(m_frameCommands.handle, m_skyboxMesh->indexBuffer->handle(), 0, VK_INDEX_TYPE_UINT32);
+			vkCmdDrawIndexed(m_frameCommands.handle, m_skyboxMesh->indexCount, 1, 0, 0, 0);
+		}
+
+		// GUI pass
+		vkCmdNextSubpass(m_frameCommands.handle, VK_SUBPASS_CONTENTS_INLINE);
 		ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), m_frameCommands.handle);
 		vkCmdEndRenderPass(m_frameCommands.handle);
 	}

@@ -56,16 +56,15 @@ public:
 
     void clear();
 
-    bool empty() const;
-
 private:
     SceneRef createNode(std::string const& name, Transform const& transform);
 
 public:
-    static constexpr uint32_t MaxTextures = 1024; //< Required for descriptor indexing in renderer
-    static constexpr uint32_t MaxShadowCasters = 64; //< Required for descriptor indexing in renderer
+    static constexpr uint32_t MaxTextures = 1024;       //< Required for descriptor indexing in renderer
+    static constexpr uint32_t MaxShadowCasters = 64;    //< Required for descriptor indexing in renderer
 
     Sun sun{}; //< XXX: Currently there is always a sun light available, should this be optional?
+    std::shared_ptr<Texture> skybox = nullptr;          //< Optional skybox
 
     SceneRef activeCamera = RefUnused; //< Reference to a scene node containing a camera reference
     std::vector<SceneRef> rootNodes{};

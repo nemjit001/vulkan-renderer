@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 struct Vertex;
@@ -44,14 +46,28 @@ std::shared_ptr<Texture> loadTexture(RenderDeviceContext* pDeviceContext, char c
 /// @return A texture or NULL on error.
 std::shared_ptr<Texture> loadTextureFromMemory(RenderDeviceContext* pDeviceContext, void* pData, size_t size);
 
+/// @brief Load cubemap textures from disk.
+/// @param pDeviceContext 
+/// @param faces 
+/// @return 
+std::shared_ptr<Texture> loadCubeMap(RenderDeviceContext* pDeviceContext, std::array<std::string, 6> const& faces);
+
 /// @brief Upload data to a texture. Mipmaps are generated for the texture automatically. The size of the data buffer must be the same
 /// as the 0th mip level extent * channels.
 /// @param pDeviceContext 
 /// @param texture 
 /// @param pData 
 /// @param size 
+/// @param layer Texture layer to upload to.
 /// @return A boolean indicating success.
-bool uploadToTexture(RenderDeviceContext* pDeviceContext, std::shared_ptr<Texture> texture, void* pData, size_t size);
+bool uploadToTexture(RenderDeviceContext* pDeviceContext, std::shared_ptr<Texture> texture, void* pData, size_t size, uint32_t layer = 0);
+
+/// @brief Generate mipmaps for a texture.
+/// @param pDeviceContext 
+/// @param texture 
+/// @param layer Layer to generate mipmaps for.
+/// @return 
+bool generateMipMaps(RenderDeviceContext* pDeviceContext, std::shared_ptr<Texture> texture, uint32_t layer = 0);
 
 /// @brief Load a scene file from disk.
 /// @param pDeviceContext 

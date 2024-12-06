@@ -406,7 +406,7 @@ std::shared_ptr<Texture> RenderDeviceContext::createTexture(
     }
 
     VkImageCreateInfo imageCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-    imageCreateInfo.flags = 0;
+    imageCreateInfo.flags = layers > 1 ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
     imageCreateInfo.imageType = imageType;
     imageCreateInfo.format = format;
     imageCreateInfo.extent = VkExtent3D{ width, height, depth };

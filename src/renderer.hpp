@@ -9,6 +9,7 @@
 #include "render_backend.hpp"
 
 class Buffer;
+class Mesh;
 class Scene;
 class Texture;
 
@@ -110,6 +111,12 @@ protected:
 		alignas(16) glm::mat4 normal;
 	};
 
+	/// @brief Uniform skybox data, expects position to be removed from view matrix.
+	struct UniformSkyboxCameraData
+	{
+		alignas(16) glm::mat4 matrix;
+	};
+
 	/// @brief Shadow map mesh draw in renderer, uses no materials.
 	struct ShadowMapDraw
 	{
@@ -199,4 +206,23 @@ protected:
 
 		//-- Optimized draw data for forward pass --//
 		std::unordered_map<uint32_t, std::vector<MeshDraw>> m_forwardDrawData;
+
+	//-- Skybox pass (forward subpass: reuses render pass, framebuffers, depth stencil) --//
+		//-- Mesh and sampler --//
+		std::shared_ptr<Mesh> m_skyboxMesh = nullptr;
+		VkSampler m_skyboxSampler = VK_NULL_HANDLE;
+
+		//-- Descriptor layouts --//
+		VkDescriptorSetLayout m_skyboxSetLayout = VK_NULL_HANDLE;
+
+		//-- Skybox pipeline --//
+		VkPipelineLayout m_skyboxPipelineLayout = VK_NULL_HANDLE;
+		VkPipeline m_skyboxPipeline = VK_NULL_HANDLE;
+
+		//-- Skybox shader buffers --//
+		std::shared_ptr<Buffer> m_skyboxCameraDataBuffer = nullptr;
+
+		//-- Descriptor set management --//
+		VkDescriptorPool m_skyboxDescriptorPool = VK_NULL_HANDLE;
+		VkDescriptorSet m_skyboxSet = VK_NULL_HANDLE;
 };

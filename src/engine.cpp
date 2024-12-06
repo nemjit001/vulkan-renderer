@@ -18,10 +18,10 @@
 #include "mesh.hpp"
 #include "renderer.hpp"
 #include "render_backend.hpp"
+#include "render_backend/buffer.hpp"
+#include "render_backend/texture.hpp"
 #include "scene.hpp"
 #include "transform.hpp"
-
-Scene scene{};
 
 Engine::Engine()
 {
@@ -79,23 +79,39 @@ Engine::Engine()
     }
 
     // Set up default scene camera & sun
-    scene.sun.zenith = 45.0F;
+    m_scene.sun.zenith = 45.0F;
+#if 0 // TODO(nemjit001): enable once skybox pass in renderer works
+    m_scene.skybox = loadCubeMap(m_pDeviceContext.get(), {
+        "data/assets/skybox/right.jpg",
+        "data/assets/skybox/left.jpg",
+        "data/assets/skybox/top.jpg",
+        "data/assets/skybox/bottom.jpg",
+        "data/assets/skybox/front.jpg",
+        "data/assets/skybox/back.jpg",
+    });
+    if (m_scene.skybox == nullptr || !m_scene.skybox->initDefaultView(VK_IMAGE_VIEW_TYPE_CUBE, VK_IMAGE_ASPECT_COLOR_BIT))
+    {
+        printf("VK Renderer skybox load failed\n");
+        m_running = false;
+        return;
+    }
+#endif
 
     Camera camera = Camera::createPerspective(60.0F, static_cast<float>(m_framebufferWidth) / static_cast<float>(m_framebufferHeight), 1.0F, 5'000.0F);
-    SceneRef cameraRef = scene.addCamera(camera);
-    SceneRef cameraNode = scene.createRootNode("Camera", Transform{{ 0.0F, 50.0F, -5.0F }});
-    scene.nodes.cameraRef[cameraNode] = cameraRef;
-    scene.activeCamera = cameraNode;
+    SceneRef cameraRef = m_scene.addCamera(camera);
+    SceneRef cameraNode = m_scene.createRootNode("Camera", Transform{{ 0.0F, 50.0F, -5.0F }});
+    m_scene.nodes.cameraRef[cameraNode] = cameraRef;
+    m_scene.activeCamera = cameraNode;
 
     // Load scene files from disk
-    if (!loadScene(m_pDeviceContext.get(), "data/assets/sponza/sponza.obj", scene))
+    if (!loadScene(m_pDeviceContext.get(), "data/assets/sponza/sponza.obj", m_scene))
     {
         printf("VK Renderer scene load failed\n");
         m_running = false;
         return;
     }
 
-    m_cameraController.getActiveCamera(&scene);
+    m_cameraController.getActiveCamera(&m_scene);
     printf("Initialized Vulkan Renderer\n");
 }
 
@@ -104,7 +120,7 @@ Engine::~Engine()
     printf("Shutting down Vulkan Renderer\n");
     m_pRenderer->awaitFrame();
 
-    scene.clear();
+    m_scene.clear();
     m_pRenderer.reset();
     m_pDeviceContext.reset();
     RenderBackend::shutdown();
@@ -190,13 +206,13 @@ void Engine::update()
     }
 
     // Get active camera state
-    SceneRef const& activeCameraRef = scene.nodes.cameraRef[scene.activeCamera];
-    Transform const& activeCameraTransform = scene.nodes.transform[scene.activeCamera];
+    SceneRef const& activeCameraRef = m_scene.nodes.cameraRef[m_scene.activeCamera];
+    Transform const& activeCameraTransform = m_scene.nodes.transform[m_scene.activeCamera];
     glm::vec3 const camPosition = activeCameraTransform.position;
     glm::vec3 const camForward = activeCameraTransform.forward();
     glm::vec3 const camRight = activeCameraTransform.right();
     glm::vec3 const camUp = activeCameraTransform.up();
-    Camera& activeCamera = scene.cameras[activeCameraRef];
+    Camera& activeCamera = m_scene.cameras[activeCameraRef];
     activeCamera.perspective.aspectRatio = static_cast<float>(m_framebufferWidth) / static_cast<float>(m_framebufferHeight);
 
     // Draw GUI
@@ -222,10 +238,14 @@ void Engine::update()
         ImGui::Text("- CPU render time: %10.2f ms", avgCPURenderTime.getAverage());
 
         ImGui::SeparatorText("Sun");
-        ImGui::DragFloat("Azimuth", &scene.sun.azimuth, 1.0F, 0.0F, 360.0F);
-        ImGui::DragFloat("Zenith", &scene.sun.zenith, 1.0F, 0.01F, 89.9F);
-        ImGui::ColorPicker3("Color", &scene.sun.color[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_DisplayRGB);
-        ImGui::ColorPicker3("Ambient", &scene.sun.ambient[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_DisplayRGB);
+        ImGui::DragFloat("Azimuth", &m_scene.sun.azimuth, 1.0F, 0.0F, 360.0F);
+        ImGui::DragFloat("Zenith", &m_scene.sun.zenith, 1.0F, 0.01F, 89.9F);
+        if (ImGui::TreeNode("Color settings"))
+        {
+            ImGui::ColorPicker3("Color", &m_scene.sun.color[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_DisplayRGB);
+            ImGui::ColorPicker3("Ambient", &m_scene.sun.ambient[0], ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_DisplayRGB);
+            ImGui::TreePop();
+        }
 
         ImGui::SeparatorText("Camera");
         ImGui::Text("Position: %8.2f %8.2f %8.2f", camPosition.x, camPosition.y, camPosition.z);
@@ -237,14 +257,14 @@ void Engine::update()
         ImGui::DragFloat("Z Far", &activeCamera.perspective.zFar, 1.0F, 0.0F, 10000.0F);
 
         ImGui::SeparatorText("Scene data");
-        ImGui::Text("Meshes:    %d", scene.meshes.size());
-        ImGui::Text("Textures:  %d", scene.textures.size());
-        ImGui::Text("Materials: %d", scene.materials.size());
-        ImGui::Text("Nodes:     %d", scene.nodes.count);
+        ImGui::Text("Meshes:    %d", m_scene.meshes.size());
+        ImGui::Text("Textures:  %d", m_scene.textures.size());
+        ImGui::Text("Materials: %d", m_scene.materials.size());
+        ImGui::Text("Nodes:     %d", m_scene.nodes.count);
 
         ImGui::SeparatorText("Scene tree");
-        for (auto const& root : scene.rootNodes) {
-            GUI::SceneTree(scene, root);
+        for (auto const& root : m_scene.rootNodes) {
+            GUI::SceneTree(m_scene, root);
         }
     }
     ImGui::End();
@@ -266,7 +286,7 @@ void Engine::update()
     }
 
     // Update subsystems
-    m_pRenderer->update(scene);
+    m_pRenderer->update(m_scene);
     m_inputManager.update();
     m_cpuUpdateTimer.tick();
 
@@ -282,7 +302,7 @@ void Engine::render()
     }
 
     m_cpuRenderTimer.reset();
-    m_pRenderer->render(scene);
+    m_pRenderer->render(m_scene);
     m_cpuRenderTimer.tick();
 
     if (!m_pDeviceContext->present()) {
