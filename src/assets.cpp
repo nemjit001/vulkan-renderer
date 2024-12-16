@@ -44,7 +44,7 @@ bool readShaderFile(char const* path, std::vector<uint32_t>& shaderCode)
     return true;
 }
 
-std::shared_ptr<Mesh> createMesh(RenderDeviceContext* pDeviceContext, Vertex* vertices, uint32_t vertexCount, uint32_t* indices, uint32_t indexCount)
+std::shared_ptr<Mesh> createMesh(RenderDeviceContext* pDeviceContext, Vertex const* vertices, uint32_t vertexCount, uint32_t const* indices, uint32_t indexCount)
 {
     assert(vertices != nullptr);
     assert(indices != nullptr);
@@ -215,24 +215,24 @@ std::shared_ptr<Texture> loadTexture(RenderDeviceContext* pDeviceContext, char c
     }
 
     // Load all images as 4 channel color targets
-    VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
-    uint32_t mipLevels = static_cast<uint32_t>(std::log2(std::max(width, height))) + 1;
-    channels = 4;
-
-    printf("Loaded texture [%s] (%d x %d x %d, %d mips)\n", path, width, height, channels, mipLevels);
+    printf("Loaded texture [%s] (%d x %d x %d, %d mips)\n", path, width, height, channels, Texture::calculateMipLevels(width, height));
     std::shared_ptr<Texture> texture = pDeviceContext->createTexture(
-        VK_IMAGE_TYPE_2D, imageFormat,
+        VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1, mipLevels
+        static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1, Texture::calculateMipLevels(width, height)
     );
 
-    if (texture == nullptr || !uploadToTexture(pDeviceContext, texture, pImageData, width * height * channels)) {
+    if (texture == nullptr || !uploadToTexture(pDeviceContext, texture, pImageData, width * height * 4)) {
         stbi_image_free(pImageData);
         return nullptr;
     }
 
     stbi_image_free(pImageData);
+    if (!generateMipMaps(pDeviceContext, texture)) {
+        return nullptr;
+    }
+
     return texture;
 }
 
@@ -246,30 +246,67 @@ std::shared_ptr<Texture> loadTextureFromMemory(RenderDeviceContext* pDeviceConte
         return false;
     }
 
-    // Load all images as 4 channel color targets
-    VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
-    uint32_t mipLevels = static_cast<uint32_t>(std::log2(std::max(width, height))) + 1;
-    channels = 4;
-
-    printf("Loaded texture from memory (%d x %d x %d, %d mips)\n", width, height, channels, mipLevels);
+    printf("Loaded texture from memory (%d x %d x %d, %d mips)\n", width, height, channels, Texture::calculateMipLevels(width, height));
     std::shared_ptr<Texture> texture = pDeviceContext->createTexture(
-        VK_IMAGE_TYPE_2D, imageFormat,
+        VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1, mipLevels
+        static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1, Texture::calculateMipLevels(width, height)
     );
 
-    if (texture == nullptr || !uploadToTexture(pDeviceContext, texture, pImageData, width * height * channels))
+    if (texture == nullptr || !uploadToTexture(pDeviceContext, texture, pImageData, width * height * 4))
     {
         stbi_image_free(pImageData);
         return nullptr;
     }
 
     stbi_image_free(pImageData);
+    if (!generateMipMaps(pDeviceContext, texture)) {
+        return nullptr;
+    }
+
     return texture;
 }
 
-bool uploadToTexture(RenderDeviceContext* pDeviceContext, std::shared_ptr<Texture> texture, void* pData, size_t size)
+std::shared_ptr<Texture> loadCubeMap(RenderDeviceContext* pDeviceContext, std::array<std::string, 6> const& faces)
+{
+    int texWidth = 0, texHeight = 0;
+    std::array<int, 6> widths;
+    std::array<int, 6> heights;
+    std::array<stbi_uc*, 6> images;
+    for (size_t i = 0; i < 6; i++)
+    {
+        int width = 0, height = 0, channels = 0;
+        images[i] = stbi_load(faces[i].c_str(), &width, &height, &channels, 4);
+        widths[i] = width;
+        heights[i] = height;
+
+        texWidth = std::max(texWidth, width);
+        texHeight = std::max(texHeight, height);
+        printf("Loaded cubemap face [%s]\n", faces[i].c_str());
+    }
+
+    printf("Loaded cubemap (%d x %d)\n", texWidth, texHeight);
+    std::shared_ptr<Texture> texture = pDeviceContext->createTexture(
+        VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        texWidth, texHeight, 1, 1, 6
+    );
+
+    if (texture == nullptr) {
+        return nullptr;
+    }
+
+    uint32_t layerIdx = 0;
+    for (size_t i = 0; i < 6; i++) {
+        uploadToTexture(pDeviceContext, texture, images[i], widths[i] * heights[i] * 4, layerIdx++);
+        stbi_image_free(images[i]);
+    }
+
+    return texture;
+}
+
+bool uploadToTexture(RenderDeviceContext* pDeviceContext, std::shared_ptr<Texture> texture, void* pData, size_t size, uint32_t layer)
 {
     std::shared_ptr<Buffer> uploadBuffer = pDeviceContext->createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
     if (uploadBuffer == nullptr) {
@@ -307,8 +344,8 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, std::shared_ptr<Textur
         transferBarrier.image = texture->handle;
         transferBarrier.subresourceRange.baseMipLevel = 0;
         transferBarrier.subresourceRange.levelCount = texture->levels;
-        transferBarrier.subresourceRange.baseArrayLayer = 0;
-        transferBarrier.subresourceRange.layerCount = texture->size.depthOrLayers;
+        transferBarrier.subresourceRange.baseArrayLayer = layer;
+        transferBarrier.subresourceRange.layerCount = 1;
         transferBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
         vkCmdPipelineBarrier(uploadCommandContext.handle,
@@ -325,7 +362,7 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, std::shared_ptr<Textur
         imageCopy.bufferRowLength = texture->size.width;
         imageCopy.bufferImageHeight = texture->size.height;
         imageCopy.imageSubresource.mipLevel = 0;
-        imageCopy.imageSubresource.baseArrayLayer = 0;
+        imageCopy.imageSubresource.baseArrayLayer = layer;
         imageCopy.imageSubresource.layerCount = 1;
         imageCopy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         imageCopy.imageOffset = VkOffset3D{ 0, 0, 0 };
@@ -339,90 +376,18 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, std::shared_ptr<Textur
             1, &imageCopy
         );
 
-        // XXX: This mip calulcation only works for textures that are powers of 2
-        int32_t srcWidth = static_cast<int32_t>(texture->size.width);
-        int32_t srcHeight = static_cast<int32_t>(texture->size.height);
-        for (uint32_t level = 0; level < texture->levels - 1; level++)
-        {
-            int32_t dstWidth = srcWidth / 2;
-            int32_t dstHeight = srcHeight / 2;
-
-            VkImageMemoryBarrier srcMipBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-            srcMipBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            srcMipBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            srcMipBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            srcMipBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            srcMipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            srcMipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            srcMipBarrier.image = texture->handle;
-            srcMipBarrier.subresourceRange.baseMipLevel = level;
-            srcMipBarrier.subresourceRange.levelCount = 1;
-            srcMipBarrier.subresourceRange.baseArrayLayer = 0;
-            srcMipBarrier.subresourceRange.layerCount = texture->size.depthOrLayers;
-            srcMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-            VkImageMemoryBarrier dstMipBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-            dstMipBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            dstMipBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            dstMipBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            dstMipBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            dstMipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            dstMipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            dstMipBarrier.image = texture->handle;
-            dstMipBarrier.subresourceRange.baseMipLevel = level + 1;
-            dstMipBarrier.subresourceRange.levelCount = 1;
-            dstMipBarrier.subresourceRange.baseArrayLayer = 0;
-            dstMipBarrier.subresourceRange.layerCount = texture->size.depthOrLayers;
-            dstMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-            VkImageMemoryBarrier mipBarriers[] = { srcMipBarrier, dstMipBarrier, };
-            vkCmdPipelineBarrier(uploadCommandContext.handle,
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                0,
-                0, nullptr,
-                0, nullptr,
-                static_cast<uint32_t>(std::size(mipBarriers)), mipBarriers
-            );
-
-            VkImageBlit blitRegion{};
-            blitRegion.srcOffsets[0] = VkOffset3D{ 0, 0, 0, };
-            blitRegion.srcOffsets[1] = VkOffset3D{ srcWidth, srcHeight, 1, };
-            blitRegion.srcSubresource.baseArrayLayer = 0;
-            blitRegion.srcSubresource.layerCount = 1;
-            blitRegion.srcSubresource.mipLevel = level;
-            blitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            blitRegion.dstOffsets[0] = VkOffset3D{ 0, 0, 0, };
-            blitRegion.dstOffsets[1] = VkOffset3D{ dstWidth, dstHeight, 1, };
-            blitRegion.dstSubresource.baseArrayLayer = 0;
-            blitRegion.dstSubresource.layerCount = 1;
-            blitRegion.dstSubresource.mipLevel = level + 1;
-            blitRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-            vkCmdBlitImage(
-                uploadCommandContext.handle,
-                texture->handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                texture->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                1, &blitRegion,
-                VK_FILTER_LINEAR
-            );
-
-            srcWidth = dstWidth;
-            srcHeight = dstHeight;
-        }
-
         VkImageMemoryBarrier shaderBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
         shaderBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
         shaderBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        shaderBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        shaderBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         shaderBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         shaderBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         shaderBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         shaderBarrier.image = texture->handle;
         shaderBarrier.subresourceRange.baseMipLevel = 0;
         shaderBarrier.subresourceRange.levelCount = texture->levels;
-        shaderBarrier.subresourceRange.baseArrayLayer = 0;
-        shaderBarrier.subresourceRange.layerCount = texture->size.depthOrLayers;
+        shaderBarrier.subresourceRange.baseArrayLayer = layer;
+        shaderBarrier.subresourceRange.layerCount = 1;
         shaderBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
         vkCmdPipelineBarrier(uploadCommandContext.handle,
@@ -471,8 +436,157 @@ bool uploadToTexture(RenderDeviceContext* pDeviceContext, std::shared_ptr<Textur
     return true;
 }
 
+bool generateMipMaps(RenderDeviceContext* pDeviceContext, std::shared_ptr<Texture> texture, uint32_t layer)
+{
+    assert(layer < texture->size.depthOrLayers);
+
+    CommandContext mipmapCommandContext{};
+    if (!pDeviceContext->createCommandContext(CommandQueueType::Copy, mipmapCommandContext))
+    {
+        return false;
+    }
+
+    VkCommandBufferBeginInfo mipmapBeginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    mipmapBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    mipmapBeginInfo.pInheritanceInfo = nullptr;
+
+    if (VK_FAILED(vkBeginCommandBuffer(mipmapCommandContext.handle, &mipmapBeginInfo)))
+    {
+        pDeviceContext->destroyCommandContext(mipmapCommandContext);
+        return false;
+    }
+
+    // XXX: This mip calculation only works for textures that are powers of 2
+    int32_t srcWidth = static_cast<int32_t>(texture->size.width);
+    int32_t srcHeight = static_cast<int32_t>(texture->size.height);
+    for (uint32_t level = 0; level < texture->levels - 1; level++)
+    {
+        int32_t dstWidth = srcWidth / 2;
+        int32_t dstHeight = srcHeight / 2;
+
+        VkImageMemoryBarrier srcMipBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        srcMipBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        srcMipBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        srcMipBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        srcMipBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        srcMipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        srcMipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        srcMipBarrier.image = texture->handle;
+        srcMipBarrier.subresourceRange.baseMipLevel = level;
+        srcMipBarrier.subresourceRange.levelCount = 1;
+        srcMipBarrier.subresourceRange.baseArrayLayer = layer;
+        srcMipBarrier.subresourceRange.layerCount = 1;
+        srcMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+        VkImageMemoryBarrier dstMipBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        dstMipBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        dstMipBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        dstMipBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        dstMipBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        dstMipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        dstMipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        dstMipBarrier.image = texture->handle;
+        dstMipBarrier.subresourceRange.baseMipLevel = level + 1;
+        dstMipBarrier.subresourceRange.levelCount = 1;
+        dstMipBarrier.subresourceRange.baseArrayLayer = layer;
+        dstMipBarrier.subresourceRange.layerCount = 1;
+        dstMipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+        VkImageMemoryBarrier mipBarriers[] = { srcMipBarrier, dstMipBarrier, };
+        vkCmdPipelineBarrier(mipmapCommandContext.handle,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0, nullptr,
+            0, nullptr,
+            static_cast<uint32_t>(std::size(mipBarriers)), mipBarriers
+        );
+
+        VkImageBlit blitRegion{};
+        blitRegion.srcOffsets[0] = VkOffset3D{ 0, 0, 0, };
+        blitRegion.srcOffsets[1] = VkOffset3D{ srcWidth, srcHeight, 1, };
+        blitRegion.srcSubresource.baseArrayLayer = layer;
+        blitRegion.srcSubresource.layerCount = 1;
+        blitRegion.srcSubresource.mipLevel = level;
+        blitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blitRegion.dstOffsets[0] = VkOffset3D{ 0, 0, 0, };
+        blitRegion.dstOffsets[1] = VkOffset3D{ dstWidth, dstHeight, 1, };
+        blitRegion.dstSubresource.baseArrayLayer = layer;
+        blitRegion.dstSubresource.layerCount = 1;
+        blitRegion.dstSubresource.mipLevel = level + 1;
+        blitRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+        vkCmdBlitImage(
+            mipmapCommandContext.handle,
+            texture->handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            texture->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &blitRegion,
+            VK_FILTER_LINEAR
+        );
+
+        srcWidth = dstWidth;
+        srcHeight = dstHeight;
+    }
+
+    VkImageMemoryBarrier shaderBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    shaderBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    shaderBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    shaderBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    shaderBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    shaderBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    shaderBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    shaderBarrier.image = texture->handle;
+    shaderBarrier.subresourceRange.baseMipLevel = 0;
+    shaderBarrier.subresourceRange.levelCount = texture->levels;
+    shaderBarrier.subresourceRange.baseArrayLayer = 0;
+    shaderBarrier.subresourceRange.layerCount = texture->size.depthOrLayers;
+    shaderBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+    vkCmdPipelineBarrier(mipmapCommandContext.handle,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &shaderBarrier
+    );
+
+    if (VK_FAILED(vkEndCommandBuffer(mipmapCommandContext.handle)))
+    {
+        pDeviceContext->destroyCommandContext(mipmapCommandContext);
+        return false;
+    }
+
+    VkFence mipmapFence = VK_NULL_HANDLE;
+    if (!pDeviceContext->createFence(&mipmapFence, false))
+    {
+        pDeviceContext->destroyCommandContext(mipmapCommandContext);
+        return false;
+    }
+
+    VkSubmitInfo mipmapSubmit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    mipmapSubmit.waitSemaphoreCount = 0;
+    mipmapSubmit.pWaitSemaphores = nullptr;
+    mipmapSubmit.pWaitDstStageMask = nullptr;
+    mipmapSubmit.commandBufferCount = 1;
+    mipmapSubmit.pCommandBuffers = &mipmapCommandContext.handle;
+    mipmapSubmit.signalSemaphoreCount = 0;
+    mipmapSubmit.pSignalSemaphores = nullptr;
+
+    if (VK_FAILED(vkQueueSubmit(pDeviceContext->directQueue, 1, &mipmapSubmit, mipmapFence)))
+    {
+        pDeviceContext->destroyFence(mipmapFence);
+        pDeviceContext->destroyCommandContext(mipmapCommandContext);
+        return false;
+    }
+
+    vkWaitForFences(pDeviceContext->device, 1, &mipmapFence, VK_TRUE, UINT64_MAX);
+    pDeviceContext->destroyFence(mipmapFence);
+    pDeviceContext->destroyCommandContext(mipmapCommandContext);
+    return true;
+}
+
 // Helper function for recursive node tree walking
-// TODO(nemjit001): walk node tree & store data in scene structure
 void sceneTraverseChildren(
     Scene& scene,
     aiScene const* pImportedScene,

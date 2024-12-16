@@ -1,5 +1,8 @@
 #include "texture.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 #include <volk.h>
 
 #include "utils.hpp"
@@ -30,8 +33,11 @@ Texture::~Texture()
         return;
     }
 
+    if (view != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, view, nullptr);
+    }
+
     vkFreeMemory(device, memory, nullptr);
-    vkDestroyImageView(device, view, nullptr);
     vkDestroyImage(device, handle, nullptr);
 }
 
@@ -56,4 +62,9 @@ bool Texture::initDefaultView(VkImageViewType viewType, VkImageAspectFlags aspec
     }
 
     return true;
+}
+
+uint32_t Texture::calculateMipLevels(uint32_t width, uint32_t height)
+{
+    return std::log2(std::max(width, height)) + 1;
 }
