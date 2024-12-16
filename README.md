@@ -5,6 +5,13 @@ The aim of this project is to combine lessons learned in previous renderers into
 
 Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12-renderer), in which the same capabilities are implemented using DX12.
 
+## TODOs
+
+- [ ] Automatic descriptor layout / set / pool management
+	- [ ] Descriptor layout builder
+	- [ ] Descriptor set manager w/ layout cache for reuse
+	- [ ] Allocate from manager w/ automatic pool realloc and reset per frame
+
 ## Features
 
 - [X] OBJ mesh loading
@@ -23,7 +30,7 @@ Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12
 		- [X] Point
 		- [X] Directional
 	- [ ] Shadow mapped lights
-- [ ] Skybox
+- [X] Skybox
 - [ ] Render pipeline
 	- [X] Shadow mapping pass
 	- [ ] Depth prepass

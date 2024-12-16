@@ -12,8 +12,11 @@ layout(set = 0, binding = 0) uniform CAMERA_DATA
 
 void main()
 {
-	o_UVW = v_Position;
-	o_UVW.xy *= -1.0;
+	vec4 position = matrix * vec4(v_Position, 1.0);
+	position.z = position.w; // Ensures perspective divide is always 1
 
-	gl_Position = matrix * vec4(v_Position, 1.0);
+	o_UVW = v_Position;
+	o_UVW.xy *= -1.0F;
+
+	gl_Position = position;
 }

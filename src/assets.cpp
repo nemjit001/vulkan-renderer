@@ -44,7 +44,7 @@ bool readShaderFile(char const* path, std::vector<uint32_t>& shaderCode)
     return true;
 }
 
-std::shared_ptr<Mesh> createMesh(RenderDeviceContext* pDeviceContext, Vertex* vertices, uint32_t vertexCount, uint32_t* indices, uint32_t indexCount)
+std::shared_ptr<Mesh> createMesh(RenderDeviceContext* pDeviceContext, Vertex const* vertices, uint32_t vertexCount, uint32_t const* indices, uint32_t indexCount)
 {
     assert(vertices != nullptr);
     assert(indices != nullptr);
@@ -271,29 +271,36 @@ std::shared_ptr<Texture> loadTextureFromMemory(RenderDeviceContext* pDeviceConte
 std::shared_ptr<Texture> loadCubeMap(RenderDeviceContext* pDeviceContext, std::array<std::string, 6> const& faces)
 {
     int texWidth = 0, texHeight = 0;
+    std::array<int, 6> widths;
+    std::array<int, 6> heights;
     std::array<stbi_uc*, 6> images;
     for (size_t i = 0; i < 6; i++)
     {
         int width = 0, height = 0, channels = 0;
         images[i] = stbi_load(faces[i].c_str(), &width, &height, &channels, 4);
+        widths[i] = width;
+        heights[i] = height;
 
-        texWidth = width;
-        texHeight = height;
+        texWidth = std::max(texWidth, width);
+        texHeight = std::max(texHeight, height);
+        printf("Loaded cubemap face [%s]\n", faces[i].c_str());
     }
 
-    // TODO(nemjit001): load all 6 face textures into single 2D texture with 6 layers
+    printf("Loaded cubemap (%d x %d)\n", texWidth, texHeight);
     std::shared_ptr<Texture> texture = pDeviceContext->createTexture(
         VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        512, 512, 1, 1, 6
+        texWidth, texHeight, 1, 1, 6
     );
 
     if (texture == nullptr) {
         return nullptr;
     }
 
-    for (auto& pImage : images) {
-        stbi_image_free(pImage);
+    uint32_t layerIdx = 0;
+    for (size_t i = 0; i < 6; i++) {
+        uploadToTexture(pDeviceContext, texture, images[i], widths[i] * heights[i] * 4, layerIdx++);
+        stbi_image_free(images[i]);
     }
 
     return texture;

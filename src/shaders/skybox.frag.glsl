@@ -5,7 +5,7 @@ layout(location = 0) in vec3 i_UVW;
 
 layout(location = 0) out vec4 f_FragColor;
 
-layout(set = 0, binding = 0) uniform samplerCube skybox;
+layout(set = 0, binding = 1) uniform samplerCube skybox;
 
 void main()
 {

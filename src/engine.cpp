@@ -78,9 +78,8 @@ Engine::Engine()
         return;
     }
 
-    // Set up default scene camera & sun
+    // Set up default scene sun, skybox & camera
     m_scene.sun.zenith = 45.0F;
-#if 0 // TODO(nemjit001): enable once skybox pass in renderer works
     m_scene.skybox = loadCubeMap(m_pDeviceContext.get(), {
         "data/assets/skybox/right.jpg",
         "data/assets/skybox/left.jpg",
@@ -89,13 +88,13 @@ Engine::Engine()
         "data/assets/skybox/front.jpg",
         "data/assets/skybox/back.jpg",
     });
+
     if (m_scene.skybox == nullptr || !m_scene.skybox->initDefaultView(VK_IMAGE_VIEW_TYPE_CUBE, VK_IMAGE_ASPECT_COLOR_BIT))
     {
         printf("VK Renderer skybox load failed\n");
         m_running = false;
         return;
     }
-#endif
 
     Camera camera = Camera::createPerspective(60.0F, static_cast<float>(m_framebufferWidth) / static_cast<float>(m_framebufferHeight), 1.0F, 5'000.0F);
     SceneRef cameraRef = m_scene.addCamera(camera);
