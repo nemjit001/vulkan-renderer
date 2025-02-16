@@ -3,8 +3,6 @@
 Vulkan toy renderer written in C++. Based on previous experience with Vulkan.
 The aim of this project is to combine lessons learned in previous renderers into a high quality renderer.
 
-Sister repository to [directx12-renderer](https://github.com/nemjit001/directx12-renderer), in which the same capabilities are implemented using DX12.
-
 ## TODOs
 
 - [ ] Automatic descriptor layout / set / pool management
